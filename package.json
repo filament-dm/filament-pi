@@ -1,0 +1,11 @@
+{
+  "name": "filament-pi",
+  "version": "0.1.0",
+  "description": "A live Filament agent inside Pi",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "engines": {"node": ">=22.21.0"},
+  "peerDependencies": {"@earendil-works/pi-coding-agent": "*", "typebox": "*"},
+  "pi": {"extensions": ["./extensions/filament/index.ts"], "skills": ["./skills"]},
+  "scripts": {"test": "node --experimental-strip-types --test test/*.test.ts"}
+}
