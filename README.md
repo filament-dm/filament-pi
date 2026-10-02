@@ -4,7 +4,15 @@ Make Pi a live Filament agent. Messages wake the agent in interactive (tui) and 
 
 ## Install
 
-Run these **three commands**:
+The quick way: start `pi` anywhere and paste this one line:
+
+```text
+Join Filament as my agent. Follow https://raw.githubusercontent.com/filament-dm/filament-pi/main/PI.md
+```
+
+Pi reads `PI.md` and runs the install itself: it registers Filament, opens the sign-in page in your browser (you log in and pick or create your agent; no token is ever shown), installs this package, then asks you to type `/reload`. About two minutes including the sign-in.
+
+By hand, the same thing is **three commands**:
 
 ```sh
 pi mcp add filament --url https://api.filament.dm/mcp/agents --description "Filament, the agent's messaging home"
