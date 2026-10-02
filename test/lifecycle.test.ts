@@ -154,3 +154,62 @@ test('L24 admission race: pre-send inode replacement refuses reply without reque
   lock.hooks.beforeAdmission = async () => { if (++checks === 3) { await unlink(lock.path); await writeFile(lock.path, 'foreign'); } };
   await assert.rejects(f.listener.reply({reply_key: f.key(), markdown_body: 'Race'}), new RegExp(ADMISSION)); assert.equal(f.server.count('post_message'), 0); assert.equal(await readFile(lock.path, 'utf8'), 'foreign');
 });
+
+test('L25 adoption: orphan image downloaded, rendered in order, replied once in either history order', async t => {
+  for (const reverse of [false, true]) {
+    const f = await fixture(t);
+    const item = f.server.enqueue('text');
+    const image = {event_id: 'image', sender: '@principal:fake.test', body: '', ts: null, is_from_self: false,
+      is_from_principal: true, media: [{mxc_url: 'mxc://fake/orphan', filename: 'orphan.png', mimetype: 'image/png'}]};
+    const history = [{...image, event_id: 'too-old'}, {event_id: 'own', sender: f.server.identity.user_id, body: 'Earlier reply', ts: null}, image, ...item.messages];
+    const recent = () => ({result: {messages: reverse ? [...history].reverse() : history}});
+    f.server.script('get_recent_messages', recent()); await f.poll();
+    const batch = f.listener.batches.get(f.key())!;
+    assert.deepEqual(batch.eventIds, ['text', 'image']); assert.ok(f.listener.inFlight.has('image'));
+    assert.equal(batch.media.length, 1); assert.equal((await readFile(batch.media[0].path)).length, f.server.mediaBytes);
+    const content = f.work()[0].content;
+    assert.equal(content.match(/\[attachment:/g)?.length, 1);
+    assert.ok(content.indexOf('[attachment:') < content.indexOf('Message text'));
+    assert.match(content, /\(An image-only message above was attached to this batch because Filament delivers it without text\.\)/);
+    assert.equal(await f.listener.reply({reply_key: f.key(), markdown_body: 'Image received'}), 'Posted.');
+    for (const id of ['text', 'image']) assert.equal(f.listener.store!.replied.get(id)?.s, 'replied');
+    assert.deepEqual(f.entries.at(-1).data.ids, ['text', 'image']);
+    f.server.enqueue('next'); history.push(item.messages.at(-1)!);
+    f.server.script('get_recent_messages', recent()); await f.poll();
+    assert.deepEqual(f.work().at(-1).details.eventIds, ['next']); assert.equal(f.server.count('media'), 1);
+  }
+});
+
+test('L25b adoption: no own message, suppression, shared download cap and concurrent reservations', async t => {
+  for (const reverse of [false, true]) {
+    const f = await fixture(t);
+    const media = (id: string) => ({event_id: id, sender: '@principal:fake.test', body: '  ', ts: null,
+      media: [{mxc_url: `mxc://fake/${id}`, filename: `${id}.png`, mimetype: 'image/png'}]});
+    await f.listener.store!.suppress(['replied'], 'replied', f.server.identity.user_id, f.server.endpoint, f.clock.now());
+    f.listener.inFlight.add('busy'); f.listener.unanswered.set('!private:fake.test', new Set(['parked']));
+    const item = f.server.enqueue('text', undefined, {media: media('text').media});
+    f.server.enqueue('text-end');
+    const second = {...item, messages: [{...item.messages[0], event_id: 'second'}, {...item.messages[1], event_id: 'second-end'}]};
+    const history = [media('replied'), media('busy'), media('parked'), media('one'), media('two'), media('three'), ...item.messages, ...second.messages, media('future')];
+    f.server.script('poll_work', {result: {work: [item, second]}});
+    f.server.script('get_recent_messages', ...[0, 1].map(() => ({result: {messages: reverse ? [...history].reverse() : history}})));
+    await f.poll();
+    const batches = [...f.listener.batches.values()];
+    const adopted = batches.flatMap(b => b.eventIds).filter(id => ['one', 'two', 'three'].includes(id));
+    assert.deepEqual([...adopted].sort(), ['one', 'three', 'two']);
+    assert.ok(batches.every(b => b.media.length <= 3));
+    assert.equal(f.server.count('media'), 4); // Three for the adopting batch, one for the other text item.
+    assert.ok(f.listener.unanswered.get(item.channel_id)?.has('parked'));
+    assert.ok(batches.every(b => !b.eventIds.some(id => ['replied', 'busy', 'parked', 'future'].includes(id))));
+    for (const batch of batches) {
+      f.server.script('poll_work', {result: {work: []}});
+      await f.listener.reply({reply_key: batch.token, ack: true});
+      for (const id of batch.eventIds) assert.equal(f.listener.store!.replied.get(id)?.s, 'acked');
+      assert.deepEqual(f.server.requests.filter(r => r.name === 'poll_work').at(-1)!.args.ack, batch.eventIds);
+    }
+    const next = f.server.enqueue('next');
+    const selfHistory = [{...media('self-sender'), sender: f.server.identity.user_id}, {...media('self-flag'), is_from_self: true}, media('after-self'), next.messages.at(-1)!];
+    f.server.script('get_recent_messages', {result: {messages: reverse ? selfHistory.reverse() : selfHistory}});
+    await f.poll(); assert.deepEqual(f.work().at(-1).details.eventIds, ['next', 'after-self']);
+  }
+});

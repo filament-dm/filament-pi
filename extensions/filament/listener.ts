@@ -250,7 +250,8 @@ export class Listener {
         const fresh = item.messages.filter(m => !this.store!.replied.has(m.event_id) && !this.inFlight.has(m.event_id) && !parked?.has(m.event_id));
         if (!fresh.length) continue;
         const messages = item.messages.filter(m => (fresh.includes(m) || parked?.has(m.event_id)) && !this.inFlight.has(m.event_id) && !this.store!.replied.has(m.event_id));
-        this.unanswered.delete(item.channel_id);
+        messages.forEach(m => parked?.delete(m.event_id));
+        if (!parked?.size) this.unanswered.delete(item.channel_id);
         const batch: Batch = {...structuredClone(item), messages: structuredClone(messages), token: `${localpart(item.channel_id)}#${this.incarnation}-${this.nonce}-${++this.counter}`,
           eventIds: [...new Set(messages.map(m => m.event_id))], media: [], deliveredAt: Infinity, generation: b.gen, state: 'open'};
         batch.eventIds.forEach(id => this.inFlight.add(id)); this.batches.set(batch.token, batch); pending.push(batch);
@@ -291,6 +292,30 @@ export class Listener {
     const call = (name: string, args: Record<string, unknown>) => b.run.client.callTool(name, args, 8000, signal);
     const messages = (result: any): Message[] => Array.isArray(result) ? result : result.messages ?? result.events ?? [];
     const recent = messages(await call('get_recent_messages', {channel: batch.is_backchannel ? this.identity?.cc_room_id ?? batch.channel_id : batch.channel_id, limit: this.config.contextMessages}));
+    // Locate work ids rather than relying on timestamps (history can return null ts).
+    const anchors = [...this.batches.values()].filter(other => other.channel_id === batch.channel_id)
+      .flatMap(other => other === batch ? batch.eventIds : [other.eventIds[0]]);
+    const positions = anchors.map(id => recent.findIndex(m => m.event_id === id)).filter(i => i >= 0);
+    const reversed = positions.length > 1 ? positions[0] > positions.at(-1)! : positions[0] === 0;
+    const ordered = reversed ? [...recent].reverse() : recent;
+    await this.store!.mutex.run(async () => {
+      if (!this.valid(b) || signal.aborted || b.run.stopping || this.batches.get(batch.token) !== batch) return;
+      const last = ordered.findLastIndex(m => batch.eventIds.includes(m.event_id));
+      const own = (m: Message) => m.is_from_self === true || m.sender === this.identity?.user_id;
+      const start = ordered.findLastIndex(own);
+      for (const message of ordered.slice(start + 1, last + 1)) {
+        const id = message.event_id;
+        if (own(message) || !message.media?.length || message.body?.trim() ||
+          this.store!.replied.has(id) || this.inFlight.has(id) ||
+          [...this.unanswered.values()].some(ids => ids.has(id))) continue;
+        batch.eventIds.push(id); this.inFlight.add(id);
+        batch.messages.push({...message, body: ''}); batch.adopted = true;
+      }
+      if (batch.adopted) {
+        const order = new Map(ordered.map((m, i) => [m.event_id, i]));
+        batch.messages.sort((a, b) => (order.get(a.event_id) ?? -1) - (order.get(b.event_id) ?? -1));
+      }
+    });
     const thread = !batch.is_backchannel && batch.thread_id ? messages(await call('get_thread', {message_id: batch.thread_id})) : [];
     for (const sender of new Set([...batch.messages, ...recent, ...thread].map(m => m.sender))) {
       if (this.names.has(sender)) continue;
@@ -299,7 +324,7 @@ export class Listener {
         if (this.valid(b) && !signal.aborted) this.names.set(sender, clean(profile.display_name ?? localpart(sender)));
       } catch (e) { if (e instanceof FilamentError && e.auth) throw e; }
     }
-    const fetched = [...recent, ...thread]; const media: any[] = []; const seen = new Set<string>();
+    const fetched = [...ordered, ...thread]; const media: any[] = []; const seen = new Set<string>();
     const dir = join(this.options.agentDir(), 'filament', 'media');
     for (const message of fetched.filter(m => batch.eventIds.includes(m.event_id))) {
       for (const attachment of message.media ?? []) {
@@ -319,8 +344,8 @@ export class Listener {
             paths.add(path); this.mediaFiles.set(batch.token, paths); return true;
           });
           if (!saved) return {contextError: 'enrichment cancelled'};
-          media.push({...attachment, path, size: bytes.length});
-        } catch { media.push({...attachment, path: undefined}); }
+          media.push({...attachment, event_id: message.event_id, path, size: bytes.length});
+        } catch { media.push({...attachment, event_id: message.event_id, path: undefined}); }
       }
     }
     return {recent: recent.filter(m => !batch.eventIds.includes(m.event_id)), thread, media,

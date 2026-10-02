@@ -526,3 +526,505 @@ fatal: Unable to create '/Users/tonyhaile/Dropbox/Claude/Filament-Pi/.git/index.
 ```
 
 The supplied sandbox permits workspace edits but protects `.git` from writes, and broader permissions are forbidden. No bypass or escalation was attempted. All deliverables remain in the working directory, unstaged. The remaining action is to stage them and create the authorised commit in a session that can write this repository's Git metadata, using the exact message `filament-pi v0.1.0 build`.
+
+
+## 2026-10-02 - Change request 1: orphaned media-only messages
+
+- Changed `extensions/filament/listener.ts` to adopt eligible history messages under the store mutex, reserve their ids, retain parked ids absent from the work item, and use the existing three-download / 20 MB limits. Reply and acknowledgement paths already record every batch id.
+- Changed `extensions/filament/render.ts` to render attachments beside their messages in history order, show unknown time for null timestamps, and add the requested adoption note.
+- Added L25 and L25b in `test/lifecycle.test.ts`: both history directions, null timestamps, downloaded files, reply persistence and repeat-poll suppression, no own message, both self-identification forms, replied/in-flight/parked exclusions, future-message exclusion, concurrent batches, shared download limits, and acknowledgement persistence/server ids.
+- Ordering interpretation: batch ids, including anchors from other open batches in the same channel, establish direction using work-item order. With one anchor at the start of history, treat history as newest first; otherwise default to the observed oldest-first order. A single interior anchor with null timestamps cannot uniquely establish direction. Missing anchors cause no adoption.
+- Added `test/adoption.test.ts` with further L25/L25b coverage for persisted reply ids, four eligible orphan images sharing the cap with work-item media, both history directions, and concurrent reservation. Overlapping edits to the same feature appeared during implementation; they were preserved and the duplicate implementation block was removed.
+- No changes outside the request. `SPEC.md`, `BUILD-BRIEF.md` and `README.md` unchanged. No commit made. No decision required; the ordering ambiguity above remains a limitation of the available server metadata.
+- Verification: `git diff --check` passed. Full suite command and passing output follow.
+
+```sh
+node --experimental-strip-types --test test/*.test.ts
+```
+
+```text
+TAP version 13
+# Subtest: L25 adoption: history-only image downloads, renders, replies and stays suppressed
+ok 1 - L25 adoption: history-only image downloads, renders, replies and stays suppressed
+  ---
+  duration_ms: 392.033834
+  type: 'test'
+  ...
+# Subtest: L25b adoption: no own message, exclusions, shared download cap and concurrent reservations
+ok 2 - L25b adoption: no own message, exclusions, shared download cap and concurrent reservations
+  ---
+  duration_ms: 1014.53025
+  type: 'test'
+  ...
+# Subtest: protocol: initialize, initialized, session echo, SSE last JSON, tool content decoding
+ok 3 - protocol: initialize, initialized, session echo, SSE last JSON, tool content decoding
+  ---
+  duration_ms: 2.653167
+  type: 'test'
+  ...
+# Subtest: protocol: request deadlines include response body; redirects never followed; token echoes redacted
+ok 4 - protocol: request deadlines include response body; redirects never followed; token echoes redacted
+  ---
+  duration_ms: 6.69025
+  type: 'test'
+  ...
+# Subtest: factory registrations: no I/O, tools and handlers wired; print/json never start
+ok 5 - factory registrations: no I/O, tools and handlers wired; print/json never start
+  ---
+  duration_ms: 183.499292
+  type: 'test'
+  ...
+# Subtest: L21 actual new process: durable incarnation advances and transcript key is refused
+ok 6 - L21 actual new process: durable incarnation advances and transcript key is refused
+  ---
+  duration_ms: 268.279292
+  type: 'test'
+  ...
+# Subtest: L21 reload process state: same identity and monotonic key counter across extension instances
+ok 7 - L21 reload process state: same identity and monotonic key counter across extension instances
+  ---
+  duration_ms: 249.380125
+  type: 'test'
+  ...
+# Subtest: reply validation: empty, HTML, horizontal rule, raw id retain batch; member mention accepted
+ok 8 - reply validation: empty, HTML, horizontal rule, raw id retain batch; member mention accepted
+  ---
+  duration_ms: 221.588458
+  type: 'test'
+  ...
+# Subtest: L2 additional keys: other channel or missing token refuses whole reply
+ok 9 - L2 additional keys: other channel or missing token refuses whole reply
+  ---
+  duration_ms: 144.62125
+  type: 'test'
+  ...
+# Subtest: hello: persisted once per credential; failed next-start retry; explicit hello always sends
+ok 10 - hello: persisted once per credential; failed next-start retry; explicit hello always sends
+  ---
+  duration_ms: 334.517125
+  type: 'test'
+  ...
+# Subtest: L13 heartbeat and hello old-generation auth completions cannot pause new session
+ok 11 - L13 heartbeat and hello old-generation auth completions cannot pause new session
+  ---
+  duration_ms: 151.412625
+  type: 'test'
+  ...
+# Subtest: L15 enrichment MCP auth pauses, media auth stays attachment-only
+ok 12 - L15 enrichment MCP auth pauses, media auth stays attachment-only
+  ---
+  duration_ms: 125.163167
+  type: 'test'
+  ...
+# Subtest: L23 persistence failure in hello and paused records closes listener and releases lock
+ok 13 - L23 persistence failure in hello and paused records closes listener and releases lock
+  ---
+  duration_ms: 194.970667
+  type: 'test'
+  ...
+# Subtest: L13 factory reload: old listener stopped, process identity and notice cache retained
+ok 14 - L13 factory reload: old listener stopped, process identity and notice cache retained
+  ---
+  duration_ms: 246.5575
+  type: 'test'
+  ...
+# Subtest: L23 heartbeat auth plus paused-store failure stops cleanly without unhandled rejection
+ok 15 - L23 heartbeat auth plus paused-store failure stops cleanly without unhandled rejection
+  ---
+  duration_ms: 128.209417
+  type: 'test'
+  ...
+# Subtest: L13 generation: resume clears open batch, drops late enrichment, next poll redelivers
+ok 16 - L13 generation: resume clears open batch, drops late enrichment, next poll redelivers
+  ---
+  duration_ms: 137.824458
+  type: 'test'
+  ...
+# Subtest: L13 generation: session_tree clears open batch, drops late enrichment, next poll redelivers
+ok 17 - L13 generation: session_tree clears open batch, drops late enrichment, next poll redelivers
+  ---
+  duration_ms: 131.020125
+  type: 'test'
+  ...
+# Subtest: L13 generation: resync clears open batch, drops late enrichment, next poll redelivers
+ok 18 - L13 generation: resync clears open batch, drops late enrichment, next poll redelivers
+  ---
+  duration_ms: 130.607417
+  type: 'test'
+  ...
+# Subtest: L13 binding: new credential start ignores old poll 401 and remains listening
+ok 19 - L13 binding: new credential start ignores old poll 401 and remains listening
+  ---
+  duration_ms: 167.85225
+  type: 'test'
+  ...
+# Subtest: L13 binding: send after five-second shutdown writes nothing; next owner restores suppression
+ok 20 - L13 binding: send after five-second shutdown writes nothing; next owner restores suppression
+  ---
+  duration_ms: 348.345417
+  type: 'test'
+  ...
+# Subtest: L13 binding: send within shutdown grace records posted outcome
+ok 21 - L13 binding: send within shutdown grace records posted outcome
+  ---
+  duration_ms: 177.13175
+  type: 'test'
+  ...
+# Subtest: L13 recovery: interrupted resending becomes unknown; interrupted reconciliation is repeatable
+ok 22 - L13 recovery: interrupted resending becomes unknown; interrupted reconciliation is repeatable
+  ---
+  duration_ms: 279.7505
+  type: 'test'
+  ...
+# Subtest: L14 stranded: one nudge, then unanswered across five settles; new input recombines, resync releases
+ok 23 - L14 stranded: one nudge, then unanswered across five settles; new input recombines, resync releases
+  ---
+  duration_ms: 86.168958
+  type: 'test'
+  ...
+# Subtest: L14 stranded: delivery during running turn evaluated only after following run
+ok 24 - L14 stranded: delivery during running turn evaluated only after following run
+  ---
+  duration_ms: 111.985083
+  type: 'test'
+  ...
+# Subtest: L15 enrichment: slow context text-only within deadline, next poll proceeds
+ok 25 - L15 enrichment: slow context text-only within deadline, next poll proceeds
+  ---
+  duration_ms: 105.433958
+  type: 'test'
+  ...
+# Subtest: L15 enrichment: ten slow items all delivered by batch-wide 20-second deadline, concurrency three
+ok 26 - L15 enrichment: ten slow items all delivered by batch-wide 20-second deadline, concurrency three
+  ---
+  duration_ms: 121.508291
+  type: 'test'
+  ...
+# Subtest: L15 enrichment: media 403 is unavailable, >20 MB cut off, successful file removed on reply
+ok 27 - L15 enrichment: media 403 is unavailable, >20 MB cut off, successful file removed on reply
+  ---
+  duration_ms: 242.576417
+  type: 'test'
+  ...
+# Subtest: L15 enrichment: independent heartbeat fires during slow enrichment
+ok 28 - L15 enrichment: independent heartbeat fires during slow enrichment
+  ---
+  duration_ms: 109.793416
+  type: 'test'
+  ...
+# Subtest: L16 render: no raw mxid; token, prior key and nudge header present
+ok 29 - L16 render: no raw mxid; token, prior key and nudge header present
+  ---
+  duration_ms: 133.350333
+  type: 'test'
+  ...
+# Subtest: L17 admission: lost lock refuses reply, ack and hello with no requests
+ok 30 - L17 admission: lost lock refuses reply, ack and hello with no requests
+  ---
+  duration_ms: 84.5345
+  type: 'test'
+  ...
+# Subtest: L18 bypass: direct posting always blocked, principal ping and reads allowed
+ok 31 - L18 bypass: direct posting always blocked, principal ping and reads allowed
+  ---
+  duration_ms: 0.438833
+  type: 'test'
+  ...
+# Subtest: L19 settings: missing defaults, wait clamp, unknown warning
+ok 32 - L19 settings: missing defaults, wait clamp, unknown warning
+  ---
+  duration_ms: 90.075875
+  type: 'test'
+  ...
+# Subtest: L20 rpc output: exactly one status message, structured details, no stdout
+ok 33 - L20 rpc output: exactly one status message, structured details, no stdout
+  ---
+  duration_ms: 83.4985
+  type: 'test'
+  ...
+# Subtest: L21 reply-key uniqueness: next incarnation rejects transcript key; same-process stop/start preserves identity
+ok 34 - L21 reply-key uniqueness: next incarnation rejects transcript key; same-process stop/start preserves identity
+  ---
+  duration_ms: 158.456084
+  type: 'test'
+  ...
+# Subtest: L21 forced collision: identical incarnation, nonce and counter resolves old instruction to current batch (accepted residual)
+ok 35 - L21 forced collision: identical incarnation, nonce and counter resolves old instruction to current batch (accepted residual)
+  ---
+  duration_ms: 124.638333
+  type: 'test'
+  ...
+# Subtest: L22 horizon: id older than 1,500 retained, corruption notice then delivery; 150 unresolved attempts retained
+ok 36 - L22 horizon: id older than 1,500 retained, corruption notice then delivery; 150 unresolved attempts retained
+  ---
+  duration_ms: 163.991583
+  type: 'test'
+  ...
+# Subtest: L23 startup: handshake 5xx twice retries, get_self timeout retries, explicit start overrides autoStart false
+ok 37 - L23 startup: handshake 5xx twice retries, get_self timeout retries, explicit start overrides autoStart false
+  ---
+  duration_ms: 163.474292
+  type: 'test'
+  ...
+# Subtest: L23 unclassified outcome: HTTP 418 HTML is unknown, never retried
+ok 38 - L23 unclassified outcome: HTTP 418 HTML is unknown, never retried
+  ---
+  duration_ms: 132.049958
+  type: 'test'
+  ...
+# Subtest: L23 persistence: EACCES stops, releases lock, refuses writes; start probes and recovers
+ok 39 - L23 persistence: EACCES stops, releases lock, refuses writes; start probes and recovers
+  ---
+  duration_ms: 131.176625
+  type: 'test'
+  ...
+# Subtest: L24 admission race: pre-send inode replacement refuses reply without request
+ok 40 - L24 admission race: pre-send inode replacement refuses reply without request
+  ---
+  duration_ms: 104.494917
+  type: 'test'
+  ...
+# Subtest: L25 adoption: orphan image downloaded, rendered in order, replied once in either history order
+ok 41 - L25 adoption: orphan image downloaded, rendered in order, replied once in either history order
+  ---
+  duration_ms: 330.442583
+  type: 'test'
+  ...
+# Subtest: L25b adoption: no own message, suppression, shared download cap and concurrent reservations
+ok 42 - L25b adoption: no own message, suppression, shared download cap and concurrent reservations
+  ---
+  duration_ms: 399.907667
+  type: 'test'
+  ...
+# Subtest: L1 delivery once: [A] polled three times gives one delivery
+ok 43 - L1 delivery once: [A] polled three times gives one delivery
+  ---
+  duration_ms: 119.513709
+  type: 'test'
+  ...
+# Subtest: L2 batches: immutable A and B follow-up, also_keys posts once and consumes both
+ok 44 - L2 batches: immutable A and B follow-up, also_keys posts once and consumes both
+  ---
+  duration_ms: 202.5785
+  type: 'test'
+  ...
+# Subtest: L3 B unseen: arrival during send becomes its own batch, never marked replied
+ok 45 - L3 B unseen: arrival during send becomes its own batch, never marked replied
+  ---
+  duration_ms: 142.953917
+  type: 'test'
+  ...
+# Subtest: L4 stale key: old answered key cannot reply to new batch in same channel
+ok 46 - L4 stale key: old answered key cannot reply to new batch in same channel
+  ---
+  duration_ms: 193.528334
+  type: 'test'
+  ...
+# Subtest: L5 parallel replies: same token sends once
+ok 47 - L5 parallel replies: same token sends once
+  ---
+  duration_ms: 207.127542
+  type: 'test'
+  ...
+# Subtest: L6 non-consuming server: ack offered, no redelivery, five second floor
+ok 48 - L6 non-consuming server: ack offered, no redelivery, five second floor
+  ---
+  duration_ms: 173.3185
+  type: 'test'
+  ...
+# Subtest: L7 ack: durable local ack, server acknowledged zero, work in response delivered
+ok 49 - L7 ack: durable local ack, server acknowledged zero, work in response delivered
+  ---
+  duration_ms: 161.128083
+  type: 'test'
+  ...
+# Subtest: L8 truncated: pages delivered in order without sleep
+ok 50 - L8 truncated: pages delivered in order without sleep
+  ---
+  duration_ms: 157.156375
+  type: 'test'
+  ...
+# Subtest: L9 errors: 5xx x3 yields 2/4/8 backoff, one notice; malformed counts; success resets
+ok 51 - L9 errors: 5xx x3 yields 2/4/8 backoff, one notice; malformed counts; success resets
+  ---
+  duration_ms: 97.479417
+  type: 'test'
+  ...
+# Subtest: L9 errors: auth {"status":401} pauses, releases lock and heartbeat, no more requests
+ok 52 - L9 errors: auth {"status":401} pauses, releases lock and heartbeat, no more requests
+  ---
+  duration_ms: 128.049375
+  type: 'test'
+  ...
+# Subtest: L9 errors: auth {"status":403} pauses, releases lock and heartbeat, no more requests
+ok 53 - L9 errors: auth {"status":403} pauses, releases lock and heartbeat, no more requests
+  ---
+  duration_ms: 128.214292
+  type: 'test'
+  ...
+# Subtest: L9 errors: auth {"error":-32001} pauses, releases lock and heartbeat, no more requests
+ok 54 - L9 errors: auth {"error":-32001} pauses, releases lock and heartbeat, no more requests
+  ---
+  duration_ms: 132.116708
+  type: 'test'
+  ...
+# Subtest: L9 errors: -32002 waits every 15 seconds, pauses after ten minute grace
+ok 55 - L9 errors: -32002 waits every 15 seconds, pauses after ten minute grace
+  ---
+  duration_ms: 182.130666
+  type: 'test'
+  ...
+# Subtest: L10 outcome map: missing event_id => unknown, consumes and saves target/body
+ok 56 - L10 outcome map: missing event_id => unknown, consumes and saves target/body
+  ---
+  duration_ms: 162.593209
+  type: 'test'
+  ...
+# Subtest: L10 outcome map: 5xx => unknown, consumes and saves target/body
+ok 57 - L10 outcome map: 5xx => unknown, consumes and saves target/body
+  ---
+  duration_ms: 158.270666
+  type: 'test'
+  ...
+# Subtest: L10 outcome map: bad arguments => rejected, consumes and saves target/body
+ok 58 - L10 outcome map: bad arguments => rejected, consumes and saves target/body
+  ---
+  duration_ms: 110.56725
+  type: 'test'
+  ...
+# Subtest: L10 outcome map: timeout => unknown, consumes and saves target/body
+ok 59 - L10 outcome map: timeout => unknown, consumes and saves target/body
+  ---
+  duration_ms: 149.635917
+  type: 'test'
+  ...
+# Subtest: L11 crash point: before-attempt
+ok 60 - L11 crash point: before-attempt
+  ---
+  duration_ms: 126.373375
+  type: 'test'
+  ...
+# Subtest: L11 crash point: after-attempt
+ok 61 - L11 crash point: after-attempt
+  ---
+  duration_ms: 192.181916
+  type: 'test'
+  ...
+# Subtest: L11 crash point: after-suppression
+ok 62 - L11 crash point: after-suppression
+  ---
+  duration_ms: 215.681333
+  type: 'test'
+  ...
+# Subtest: L11 crash point: after-outcome
+ok 63 - L11 crash point: after-outcome
+  ---
+  duration_ms: 192.949417
+  type: 'test'
+  ...
+# Subtest: L11 active send: second listener cannot reconcile the owner’s attempt
+ok 64 - L11 active send: second listener cannot reconcile the owner’s attempt
+  ---
+  duration_ms: 128.289708
+  type: 'test'
+  ...
+# Subtest: L12 resend: endpoint/identity mismatch refused, warning, resending before send, concurrent once, polling serialised
+ok 65 - L12 resend: endpoint/identity mismatch refused, warning, resending before send, concurrent once, polling serialised
+  ---
+  duration_ms: 145.895875
+  type: 'test'
+  ...
+# Subtest: L12 resend: rejection retains recovery record
+ok 66 - L12 resend: rejection retains recovery record
+  ---
+  duration_ms: 184.33725
+  type: 'test'
+  ...
+# Subtest: L12 resend: timeout retains recovery record
+ok 67 - L12 resend: timeout retains recovery record
+  ---
+  duration_ms: 191.535709
+  type: 'test'
+  ...
+# Subtest: U1 credential: documented key, legacy key, missing file, missing key; token only
+ok 68 - U1 credential: documented key, legacy key, missing file, missing key; token only
+  ---
+  duration_ms: 42.21025
+  type: 'test'
+  ...
+# Subtest: U2 store: append/lookup, last line wins, 1,500 ids, growing inode and lines, malformed and corrupt
+ok 69 - U2 store: append/lookup, last line wins, 1,500 ids, growing inode and lines, malformed and corrupt
+  ---
+  duration_ms: 12017.279458
+  type: 'test'
+  ...
+# Subtest: U2 store: concurrent reservations and overlapping process append preserve both lines
+ok 70 - U2 store: concurrent reservations and overlapping process append preserve both lines
+  ---
+  duration_ms: 97.569833
+  type: 'test'
+  ...
+# Subtest: U3 lock: acquire, live pid refusal, dead pid and stale timestamp takeover
+ok 71 - U3 lock: acquire, live pid refusal, dead pid and stale timestamp takeover
+  ---
+  duration_ms: 15.355625
+  type: 'test'
+  ...
+# Subtest: U3 lock: two spawned contenders race stale takeover through shared start barrier
+ok 72 - U3 lock: two spawned contenders race stale takeover through shared start barrier
+  ---
+  duration_ms: 76.58025
+  type: 'test'
+  ...
+# Subtest: U3 lock: paused interleaving and delayed contender abandon replacement owner
+ok 73 - U3 lock: paused interleaving and delayed contender abandon replacement owner
+  ---
+  duration_ms: 6.493083
+  type: 'test'
+  ...
+# Subtest: U3 lock: marker O_EXCL and staggered unlink/create sequence is unreachable
+ok 74 - U3 lock: marker O_EXCL and staggered unlink/create sequence is unreachable
+  ---
+  duration_ms: 5.642042
+  type: 'test'
+  ...
+# Subtest: U3 lock: crashed marker is never reclaimed; explicit reset clears and acquires
+ok 75 - U3 lock: crashed marker is never reclaimed; explicit reset clears and acquires
+  ---
+  duration_ms: 5.5765
+  type: 'test'
+  ...
+# Subtest: U3 lock: malformed O_EXCL create before write recovers after 60 seconds, young file reread three times
+ok 76 - U3 lock: malformed O_EXCL create before write recovers after 60 seconds, young file reread three times
+  ---
+  duration_ms: 10.102875
+  type: 'test'
+  ...
+# Subtest: U3 lock: malformed refresh ftruncate before write recovers after 60 seconds, young file reread three times
+ok 77 - U3 lock: malformed refresh ftruncate before write recovers after 60 seconds, young file reread three times
+  ---
+  duration_ms: 9.9755
+  type: 'test'
+  ...
+# Subtest: U3 lock: foreign inode refresh, release and admission refuse without modifying replacement
+ok 78 - U3 lock: foreign inode refresh, release and admission refuse without modifying replacement
+  ---
+  duration_ms: 5.635791
+  type: 'test'
+  ...
+# Subtest: U2 store: unterminated corrupt tail cannot swallow the next suppression record
+ok 79 - U2 store: unterminated corrupt tail cannot swallow the next suppression record
+  ---
+  duration_ms: 9.189083
+  type: 'test'
+  ...
+1..79
+# tests 79
+# suites 0
+# pass 79
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 12409.94325
+```
