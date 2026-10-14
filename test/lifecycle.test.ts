@@ -19,6 +19,10 @@ for (const event of ['resume', 'session_tree', 'resync']) test(`L13 generation: 
   wait.resolve(); await pending; assert.equal(f.listener.batches.size, 0); assert.equal(f.work().length, 1);
   await f.poll(); assert.equal(f.work().length, 2); assert.notEqual(f.key(), oldKey); assert.deepEqual(f.work()[1].details.eventIds, ['A', 'B']);
 });
+test('L26 endpoint: the registered filament server is used and its credential found', async t => {
+  const f = await fixture(t, {endpoint: undefined}); await f.poll();
+  assert.equal(f.listener.status, 'listening'); assert.ok(f.server.count('poll_work') >= 1);
+});
 test('L13 binding: new credential start ignores old poll 401 and remains listening', async t => {
   const f = await fixture(t); const wait = gate(); f.server.script('poll_work', {gate: wait.promise, ignoreAbort: true, status: 401});
   const oldRun = f.listener.current; const pending = f.poll().catch(() => {}); await until(() => f.server.count('poll_work') === 1);

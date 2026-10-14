@@ -68,7 +68,7 @@ Optional `<agentDir>/filament.json`:
 {"wait": 30, "autoStart": true, "contextMessages": 25}
 ```
 
-`wait` is an integer clamped to 1-60 seconds. `contextMessages` defaults to 25 and is clamped to 1-100. Unknown settings appear as warnings in status. `FILAMENT_AGENT_API_BASE_URL` overrides the **full MCP endpoint URL** and its credential lookup key; heartbeat and media URLs are derived from it.
+`wait` is an integer clamped to 1-60 seconds. `contextMessages` defaults to 25 and is clamped to 1-100. Unknown settings appear as warnings in status. The listener talks to the URL you registered with `pi mcp add filament --url …` (the user-level `<agentDir>/mcp.json`) and reads the credential `pi mcp login filament` stored for it; with no `filament` server it uses production. `FILAMENT_AGENT_API_BASE_URL` overrides the **full MCP endpoint URL** and its credential lookup key; heartbeat and media URLs are derived from it.
 
 ## Delivery guarantee
 

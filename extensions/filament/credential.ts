@@ -2,6 +2,19 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 
+export const PRODUCTION = 'https://api.filament.dm/mcp/agents';
+// The MCP endpoint the listener talks to and keys its credential by: FILAMENT_AGENT_API_BASE_URL,
+// else the `filament` server the user registered (`pi mcp add filament --url …` writes
+// <agentDir>/mcp.json; `pi mcp login` stores the token under `mcp__filament|<that url>`), else
+// production. An unreadable or unusable entry falls back to production, like a missing one.
+export async function endpoint(agentDir: string, env: NodeJS.ProcessEnv = process.env): Promise<string> {
+  if (env.FILAMENT_AGENT_API_BASE_URL) return env.FILAMENT_AGENT_API_BASE_URL;
+  let data;
+  try { data = JSON.parse(await readFile(join(agentDir, 'mcp.json'), 'utf8')); }
+  catch { return PRODUCTION; }
+  const url = data?.mcpServers?.filament?.url;
+  return typeof url === 'string' && /^https?:\/\/\S+$/.test(url) ? url : PRODUCTION;
+}
 export async function credential(agentDir: string, endpoint: string): Promise<string | undefined> {
   let data;
   try { data = JSON.parse(await readFile(join(agentDir, 'mcp-auth.json'), 'utf8')); }

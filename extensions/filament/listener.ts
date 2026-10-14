@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { credential, fingerprint, settings } from './credential.ts';
+import { credential, endpoint as resolveEndpoint, fingerprint, settings } from './credential.ts';
 import { FilamentClient, FilamentError, sleep, systemClock } from './protocol.ts';
 import type { Clock, Fetch } from './protocol.ts';
 import { ListenerLock, ADMISSION } from './lock.ts';
@@ -105,7 +105,7 @@ export class Listener {
           const paused = await readFile(join(dir, 'paused.json'), 'utf8').then(JSON.parse, e => { if (e.code !== 'ENOENT') throw e; });
           if (paused) { this.status = `paused (${paused.reason})`; return; }
         }
-        const endpoint = this.options.endpoint?.() ?? process.env.FILAMENT_AGENT_API_BASE_URL ?? 'https://api.filament.dm/mcp/agents';
+        const endpoint = this.options.endpoint?.() ?? await resolveEndpoint(this.options.agentDir());
         const token = await credential(this.options.agentDir(), endpoint);
         if (!token) { this.status = 'not signed in'; this.notice('credential missing', 'Not signed in. Run pi mcp login filament, then /filament start.'); return; }
         const lock = new ListenerLock(join(dir, 'listener.lock'), {clock: this.clock, hooks: this.options.lockHooks});

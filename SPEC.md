@@ -66,7 +66,7 @@ SPEC.md                            this file
 ```
 TypeScript, loaded by jiti at runtime (no build step). Tests run with `node --test` using Node 22's `--experimental-strip-types`; the builder documents the exact command in README. No runtime dependencies beyond Node 22 built-ins. The extension loads with no side effects in every mode; all I/O starts in `session_start` or a command.
 
-State lives under `<agentDir>/filament/` (from `getAgentDir()`): `listener.lock`, `replied.jsonl`, `attempts.jsonl`, `hello.json`, `paused.json`, `media/`. Endpoint override: env `FILAMENT_AGENT_API_BASE_URL` (the **full MCP endpoint URL**); media and heartbeat URLs derive from it; the credential lookup key uses it; every durable record stores it.
+State lives under `<agentDir>/filament/` (from `getAgentDir()`): `listener.lock`, `replied.jsonl`, `attempts.jsonl`, `hello.json`, `paused.json`, `media/`. Endpoint: env `FILAMENT_AGENT_API_BASE_URL` (the **full MCP endpoint URL**) if set, else the `url` of the `filament` server in `<agentDir>/mcp.json` (what `pi mcp add filament --url …` writes), else `https://api.filament.dm/mcp/agents`; media and heartbeat URLs derive from it; the credential lookup key uses it; every durable record stores it.
 
 ## 3. Install contract
 Three commands, then start Pi. The README says three.
@@ -229,6 +229,7 @@ In-process HTTP server speaking the subset in 1.3: `initialize`, `notifications/
 - L23 startup and unclassified outcomes: handshake 5xx ×2 then success → listening after the backoff; `get_self` timeout → retried; reply returns HTTP 418 with an HTML body → `unknown`; store write throws `EACCES` → listener stopped, lock released, status `storage error`, `filament_reply` refuses; `/filament start` with `autoStart: false` → listening.
 - L24 admission race: with the pre-send inode hook forcing a foreign inode → the reply is refused and no request is recorded.
 
+- L26 endpoint: no endpoint option and no env → the `filament` server's url from `mcp.json` is used and its `mcp__filament|<url>` credential found; listening.
 ### 7.3 Live tests (prod, Pi Tony, Tony sends the messages; paste raw output; each a yes/no with the observed output)
 - T0 runtime claims: tui idle `sendMessage(..., {triggerTurn: true})` starts a turn; busy with `followUp` queues and runs after; `tool_call` fires for `mcp__filament__post_message` and the block is honoured when the model is asked to use it; multi-file extension loads from `pi install ./Filament-Pi`.
 - T1 `pi mcp list` shows `filament: connected, 32 tools`.

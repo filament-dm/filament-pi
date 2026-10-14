@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile, readFile, appendFile, stat, readdir, unlink, ut
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
-import { credential, fingerprint } from '../extensions/filament/credential.ts';
+import { credential, endpoint, fingerprint, PRODUCTION } from '../extensions/filament/credential.ts';
 import { Store } from '../extensions/filament/state.ts';
 import { ListenerLock, ADMISSION } from '../extensions/filament/lock.ts';
 import { FakeClock, gate, flush } from './fake-filament.ts';
@@ -27,6 +27,18 @@ test('U1 credential: documented key, legacy key, missing file, missing key; toke
   await writeFile(join(dir, 'mcp-auth.json'), JSON.stringify({[endpoint]: {tokens: {access_token: 'legacy'}}})); assert.equal(await credential(dir, endpoint), 'legacy');
   await writeFile(join(dir, 'mcp-auth.json'), JSON.stringify({[endpoint]: {tokens: {access_token: 'legacy'}}, [`mcp__filament|${endpoint}`]: {tokens: {access_token: 'primary'}}}));
   assert.equal(await credential(dir, endpoint), 'primary'); assert.match(fingerprint('primary'), /^[0-9a-f]{16}$/);
+});
+test('U1b endpoint: env override, registered filament server, production fallback', async t => {
+  const dir = await directory(t), local = 'http://localhost:8448/mcp/agents';
+  assert.equal(await endpoint(dir, {}), PRODUCTION);
+  await writeFile(join(dir, 'mcp.json'), 'broken'); assert.equal(await endpoint(dir, {}), PRODUCTION);
+  await writeFile(join(dir, 'mcp.json'), JSON.stringify({mcpServers: {other: {url: 'http://other/mcp'}}})); assert.equal(await endpoint(dir, {}), PRODUCTION);
+  await writeFile(join(dir, 'mcp.json'), JSON.stringify({mcpServers: {filament: {command: 'npx'}}})); assert.equal(await endpoint(dir, {}), PRODUCTION);
+  await writeFile(join(dir, 'mcp.json'), JSON.stringify({mcpServers: {filament: {url: local, description: 'Filament'}}}));
+  assert.equal(await endpoint(dir, {}), local);
+  assert.equal(await endpoint(dir, {FILAMENT_AGENT_API_BASE_URL: 'http://fake/mcp'}), 'http://fake/mcp');
+  await writeFile(join(dir, 'mcp-auth.json'), JSON.stringify({[`mcp__filament|${local}`]: {tokens: {access_token: 'local'}}}));
+  assert.equal(await credential(dir, await endpoint(dir, {})), 'local');
 });
 test('U2 store: append/lookup, last line wins, 1,500 ids, growing inode and lines, malformed and corrupt', async t => {
   const dir = await directory(t), notices: string[] = [], store = new Store(dir, async () => {}, s => notices.push(s));
