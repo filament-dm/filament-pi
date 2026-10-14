@@ -38,6 +38,6 @@ export function render(batch: Batch, identity: Identity, names: Map<string, stri
     }
     lines.push('Recent context (earlier messages, not part of this request):', ...recent, 'Thread so far:', ...thread);
   }
-  lines.push(`One short reply as ${agent}, through filament_reply. Never speak as ${owner}. No raw ids. If nothing needs saying, call filament_reply with ack: true.`);
+  lines.push(`Answer in one short reply as ${agent}: filament_reply with markdown_body. Never speak as ${owner}. No raw ids. Only if nothing needs saying (a thank-you, an emoji), call filament_reply with ack: true instead.`);
   return lines.join('\n\n');
 }
