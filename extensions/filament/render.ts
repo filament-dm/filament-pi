@@ -1,5 +1,5 @@
 import type { Target } from './state.ts';
-export type Message = {event_id: string; sender: string; body: string; ts: number | string | null; is_from_self?: boolean; media?: any[]};
+export type Message = {event_id: string; sender: string; body: string; ts?: number | string | null; timestamp?: number | null; is_from_self?: boolean; media?: any[]};
 export type Item = {channel_id: string; thread_id?: string; is_backchannel: boolean; messages: Message[]; reply_with: Target | null; name?: string};
 export type Batch = Item & {token: string; eventIds: string[]; media: any[]; deliveredAt: number; generation: number;
   state: 'open' | 'nudged' | 'unanswered'; adopted?: boolean; recent?: Message[]; thread?: Message[]; contextError?: string; metadataUnavailable?: boolean};
@@ -8,6 +8,8 @@ export function localpart(id: string): string { return id.replace(/^[@!#]/, '').
 export function clean(text: string): string {
   return String(text).replace(/@([^\s:<>\[\]()]+):[a-zA-Z0-9.-]+(?::\d+)?/g, '$1');
 }
+// The server names it `timestamp` (ms); `ts` is the field this package was first written against.
+export const sentAt = (m: Message) => new Date(m.timestamp ?? m.ts ?? NaN);
 export function render(batch: Batch, identity: Identity, names: Map<string, string>, earlier: string[] = [], nudge = false): string {
   const agent = clean(identity.display_name), owner = clean(identity.owner.display_name);
   const where = batch.is_backchannel ? `your private channel with your principal ${owner}` :
@@ -16,11 +18,11 @@ export function render(batch: Batch, identity: Identity, names: Map<string, stri
   const lines = nudge ? ['You were handed this Filament message earlier and did not answer it. Answer it now with filament_reply, or ack it.', header] : [header];
   if (earlier.length) lines.push(`Earlier messages in this conversation are still open under reply_key(s) ${earlier.join(', ')}. If you have not answered them yet, answer everything in one filament_reply using this reply_key and pass those keys in also_keys.`);
   const messageLine = (m: Message) => {
-    const date = new Date(m.ts ?? NaN); const time = Number.isNaN(date.getTime()) ? 'unknown time' : `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+    const date = sentAt(m); const time = Number.isNaN(date.getTime()) ? 'unknown time' : `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
     return `${clean(names.get(m.sender) ?? localpart(m.sender))} (${time}): ${clean(m.body ?? '')}`;
   };
   const attachmentLine = (media: any) => media.path ? `[attachment: ${clean(media.filename ?? 'unknown')}, ${media.mimetype ?? 'unknown'}, ${media.size ?? 'unknown'}, file: ${media.path}]` : `[attachment unavailable: ${clean(media.filename ?? 'unknown')}]`;
-  const messages = batch.adopted ? batch.messages : [...batch.messages].sort((a, b) => +new Date(a.ts ?? NaN) - +new Date(b.ts ?? NaN));
+  const messages = batch.adopted ? batch.messages : [...batch.messages].sort((a, b) => +sentAt(a) - +sentAt(b));
   for (const message of messages) {
     lines.push(messageLine(message));
     lines.push(...batch.media.filter(m => m.event_id === message.event_id).map(attachmentLine));

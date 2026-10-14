@@ -96,6 +96,13 @@ test('L16 render: no raw mxid; token, prior key and nudge header present', async
   const text = render(f.listener.batches.get(f.key())!, f.listener.identity!, f.listener.names, ['earlier#1'], true);
   assert.ok(text.includes(f.key())); assert.ok(text.includes('earlier#1')); assert.match(text, /handed this Filament message earlier/); assert.doesNotMatch(text, /@\w+:fake.test/); assert.match(text, /Recent context/); assert.match(text, /Thread so far/);
 });
+test('L16 render: sender by profile displayname (asked by mxid) and time from the server timestamp', async t => {
+  const f = await fixture(t); f.server.enqueue('A'); await f.poll();
+  assert.equal(f.server.requests.find(r => r.name === 'get_user_profile')?.args.mxid, '@sender:fake.test');
+  const content = f.work()[0].content, at = new Date(f.clock.now());
+  assert.ok(content.includes(`Sender (${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}): Message A`));
+  assert.doesNotMatch(content, /unknown time|sender \(/);
+});
 test('L17 admission: lost lock refuses reply, ack and hello with no requests', async t => {
   const f = await fixture(t); f.server.enqueue('A'); await f.poll(); await unlink(join(f.dir, 'filament', 'listener.lock')); const count = f.server.requests.length;
   for (const action of [() => f.listener.reply({reply_key: f.key(), markdown_body: 'No'}), () => f.listener.reply({reply_key: f.key(), ack: true}), () => f.listener.hello()]) await assert.rejects(action(), new RegExp(ADMISSION));

@@ -320,8 +320,10 @@ export class Listener {
     for (const sender of new Set([...batch.messages, ...recent, ...thread].map(m => m.sender))) {
       if (this.names.has(sender)) continue;
       try {
-        const profile = await call('get_user_profile', {user_id: sender});
-        if (this.valid(b) && !signal.aborted) this.names.set(sender, clean(profile.display_name ?? localpart(sender)));
+        // The server takes `mxid` and answers {mxid, profile: {displayname}}.
+        const profile = await call('get_user_profile', {mxid: sender});
+        const name = profile.profile?.displayname ?? profile.display_name;
+        if (this.valid(b) && !signal.aborted) this.names.set(sender, clean(name ?? localpart(sender)));
       } catch (e) { if (e instanceof FilamentError && e.auth) throw e; }
     }
     const fetched = [...ordered, ...thread]; const media: any[] = []; const seen = new Set<string>();
