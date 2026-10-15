@@ -70,6 +70,16 @@ for (const error of [{status: 401}, {status: 403}, {error: -32001}]) test(`L9 er
   const count = f.server.requests.length; await f.clock.tick(120_000); await f.poll(); assert.equal(f.server.requests.length, count);
   assert.equal(JSON.parse(await readFile(join(f.dir, 'filament', 'paused.json'), 'utf8')).reason, 'credential rejected');
 });
+test('L9 errors: a credential-rejected pause lifts on start only once a new sign-in replaced the credential', async t => {
+  const f = await fixture(t); f.server.script('poll_work', {status: 401});
+  const failure = await f.poll().catch(e => e); await f.listener.retry(failure, f.listener.binding()); assert.equal(f.listener.status, 'paused (credential rejected)');
+  await f.listener.start(f.ctx); assert.equal(f.listener.status, 'paused (credential rejected)');
+  await writeFile(join(f.dir, 'mcp-auth.json'), JSON.stringify({[`mcp__filament|${f.server.endpoint}`]: {tokens: {access_token: 'fake-new-credential'}}}), {mode: 0o600});
+  await f.listener.start(f.ctx); assert.equal(f.listener.status, 'listening'); await f.poll(); assert.equal(f.listener.status, 'listening');
+  await assert.rejects(readFile(join(f.dir, 'filament', 'paused.json')), {code: 'ENOENT'});
+  // A pause for another reason still holds until an explicit /filament start.
+  await f.listener.pause(f.listener.binding(), 'agent not named'); await f.listener.start(f.ctx); assert.equal(f.listener.status, 'paused (agent not named)');
+});
 test('L9 errors: -32002 waits every 15 seconds, pauses after ten minute grace', async t => {
   const f = await fixture(t); const b = f.listener.binding();
   for (let i = 0; i < 40; i++) { const pending = f.listener.retry(new FilamentError('reserved', -32002, true), b); await flush(); assert.equal(f.listener.status, 'waiting for naming'); await f.clock.tick(15_000); await pending; }

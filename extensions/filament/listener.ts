@@ -108,12 +108,16 @@ export class Listener {
         this.config = await settings(this.options.agentDir());
         if (!explicit && !this.config.autoStart) { this.status = 'stopped'; return; }
         await mkdir(dir, {recursive: true, mode: 0o700});
-        if (!explicit) {
-          const paused = await readFile(join(dir, 'paused.json'), 'utf8').then(JSON.parse, e => { if (e.code !== 'ENOENT') throw e; });
-          if (paused) { this.status = `paused (${paused.reason})`; return; }
-        }
         const endpoint = this.options.endpoint?.() ?? await resolveEndpoint(this.options.agentDir());
         const token = await credential(this.options.agentDir(), endpoint);
+        let unpause = explicit;
+        if (!explicit) {
+          const paused = await readFile(join(dir, 'paused.json'), 'utf8').then(JSON.parse, e => { if (e.code !== 'ENOENT') throw e; });
+          // A rejected credential that a new sign-in has since replaced no longer holds the
+          // listener back: that sign-in is the owner's fix (Connect again after a delete).
+          if (paused && !(paused.reason === 'credential rejected' && token && await this.replaced(paused, token))) { this.status = `paused (${paused.reason})`; return; }
+          unpause = !!paused;
+        }
         if (!token) { this.status = 'not signed in'; this.notice('credential missing', 'Not signed in. Run pi mcp login filament, then /filament start.'); return; }
         const lock = new ListenerLock(join(dir, 'listener.lock'), {clock: this.clock, hooks: this.options.lockHooks});
         if (reset) await lock.reset();
@@ -124,7 +128,7 @@ export class Listener {
         this.store = new Store(dir, () => this.guard(), message => this.notice(message, message));
         while (!run.abort.signal.aborted) {
           const binding = this.binding();
-          try { await this.initialise(binding, explicit); }
+          try { await this.initialise(binding, unpause); }
           catch (e) { if (this.valid(binding) || run.abort.signal.aborted) throw e; }
           if (this.valid(binding)) break;
         }
@@ -136,6 +140,13 @@ export class Listener {
         else void this.loop(run).catch(e => this.storageError(e, {run, gen: this.generation}));
       } catch (e) { await this.storageError(e); }
     });
+  }
+  // Whether the credential is not the one a 'credential rejected' pause recorded. Pauses written
+  // before the fingerprint was recorded compare the sign-in file's time with the pause's.
+  async replaced(paused: {fingerprint?: string; at?: number}, token: string): Promise<boolean> {
+    if (paused.fingerprint) return paused.fingerprint !== fingerprint(token);
+    const signedIn = await stat(join(this.options.agentDir(), 'mcp-auth.json')).then(s => s.mtimeMs, () => 0);
+    return typeof paused.at === 'number' && signedIn > paused.at;
   }
   async initialise(b: Binding, unpause: boolean) {
     const store = this.store!;
@@ -213,7 +224,7 @@ export class Listener {
   }
   async pause(b: Binding, reason: string) {
     if (!this.valid(b)) return;
-    await this.persist(b, () => this.store!.atomic('paused.json', {reason, at: this.clock.now(), endpoint: b.run.client.endpoint}));
+    await this.persist(b, () => this.store!.atomic('paused.json', {reason, at: this.clock.now(), endpoint: b.run.client.endpoint, fingerprint: b.run.fingerprint}));
     this.status = `paused (${reason})`;
     this.notice(reason, reason === 'credential rejected' ? `Filament rejected ${this.identity?.display_name ?? 'the agent'}'s credential. Run pi mcp login filament, then /filament start.` : 'Finish naming the agent in the Filament app, then run /filament start.');
     await this.halt(b.run);
