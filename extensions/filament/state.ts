@@ -10,8 +10,9 @@ export class Mutex {
 }
 export type Suppression = {id: string; s: 'replied' | 'acked' | 'uncertain'; t: number; a: string; endpoint: string};
 export type Target = {tool: string; args: Record<string, unknown>};
+export type Attachment = {mxc_url: string; filename?: string};
 export type Attempt = {id: string; state: 'attempting' | 'resending' | 'posted' | 'unknown' | 'rejected';
-  endpoint: string; agent_user_id: string; tokens: string[]; channel_id: string; ids: string[]; reply_with: Target; body: string; at: number; error?: string};
+  endpoint: string; agent_user_id: string; tokens: string[]; channel_id: string; ids: string[]; reply_with: Target; body: string; attachments?: Attachment[]; at: number; error?: string};
 export class Store {
   dir: string;
   mutex = new Mutex();

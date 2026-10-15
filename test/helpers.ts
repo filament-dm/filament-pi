@@ -11,6 +11,8 @@ export async function fixture(t: any, overrides: Partial<Options> = {}) {
   const pi: any = {sendMessage: (message: any, options: any) => messages.push({...message, options}), appendEntry: (type: string, data: any) => entries.push({type, data})};
   const ctx: any = {mode: 'rpc', hasUI: true, isIdle: () => true, ui: {notify: (message: string) => notices.push(message)}, sessionManager: {getSessionId: () => 'test-session', getBranch: () => [], getEntries: () => []}};
   await writeFile(join(dir, 'mcp-auth.json'), JSON.stringify({[`mcp__filament|${server.endpoint}`]: {tokens: {access_token: 'fake-test-credential'}}}), {mode: 0o600});
+  // What `pi mcp add filament --url …` writes; used when a test drops the endpoint option.
+  await writeFile(join(dir, 'mcp.json'), JSON.stringify({mcpServers: {filament: {url: server.endpoint}}}));
   const options = {agentDir: () => dir, endpoint: () => server.endpoint, clock, fetch: server.fetch, log: (s: string) => notices.push(s), autoLoop: false, ...overrides};
   const listener = new Listener(pi, options);
   t.after(async () => { await listener.stop(); await server.close(); await flush(); await rm(dir, {recursive: true, force: true}); });

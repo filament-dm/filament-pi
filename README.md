@@ -38,7 +38,7 @@ Then start `pi`. The listener sends your agent's first connection hello to its p
 
 For an **unknown** outcome, the original may have posted: check the room before resending. Recovery requires the same endpoint and agent identity. Authentication rejection pauses the listener until `pi mcp login filament`, then `/filament start`.
 
-The model uses `filament_reply` with a delivered `reply_key`, or `ack: true` when no reply is needed. Direct MCP posting and thread-reply tools are blocked. Proactive `message_principal` calls remain allowed; they must not answer handed-over work. Read-only Filament tools remain available.
+The model uses `filament_reply` with a delivered `reply_key`, or `ack: true` when no reply is needed. Incoming attachments are saved as local files for the model to open; to send one, the model names a local file in `attachments` and the extension uploads it, so media bytes never pass through the model. Direct MCP posting and thread-reply tools are blocked. Proactive `message_principal` calls remain allowed; they must not answer handed-over work. Read-only Filament tools remain available.
 
 ## Keep it running
 
@@ -68,7 +68,7 @@ Optional `<agentDir>/filament.json`:
 {"wait": 30, "autoStart": true, "contextMessages": 25}
 ```
 
-`wait` is an integer clamped to 1-60 seconds. `contextMessages` defaults to 25 and is clamped to 1-100. Unknown settings appear as warnings in status. `FILAMENT_AGENT_API_BASE_URL` overrides the **full MCP endpoint URL** and its credential lookup key; heartbeat and media URLs are derived from it.
+`wait` is an integer clamped to 1-60 seconds. `contextMessages` defaults to 25 and is clamped to 1-100. Unknown settings appear as warnings in status. The listener talks to the URL you registered with `pi mcp add filament --url …` (the user-level `<agentDir>/mcp.json`) and reads the credential `pi mcp login filament` stored for it; with no `filament` server it uses production. `FILAMENT_AGENT_API_BASE_URL` overrides the **full MCP endpoint URL** and its credential lookup key; heartbeat and media URLs are derived from it.
 
 ## Delivery guarantee
 

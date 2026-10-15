@@ -1,24 +1,31 @@
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, readFile, realpath, stat, unlink, writeFile } from 'node:fs/promises';
+import { basename, extname, join, resolve, sep } from 'node:path';
+import { homedir } from 'node:os';
 import { createHash, randomBytes } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { credential, fingerprint, settings } from './credential.ts';
+import { credential, endpoint as resolveEndpoint, fingerprint, settings } from './credential.ts';
 import { FilamentClient, FilamentError, sleep, systemClock } from './protocol.ts';
 import type { Clock, Fetch } from './protocol.ts';
 import { ListenerLock, ADMISSION } from './lock.ts';
 import type { LockHooks } from './lock.ts';
 import { Store, Mutex } from './state.ts';
-import type { Attempt } from './state.ts';
+import type { Attempt, Attachment } from './state.ts';
 import { render, localpart, clean } from './render.ts';
 import type { Batch, Identity, Item, Message } from './render.ts';
 
 export type Run = {client: FilamentClient; abort: AbortController; polling: AbortController; lock: ListenerLock;
   fingerprint: string; stopping: boolean; timers: Set<unknown>; sends: Set<Promise<unknown>>; cursor?: string; ackIds: string[]; failures: number; namingAt?: number};
 type Binding = {run: Run; gen: number};
+export type ReplyParams = {reply_key: string; markdown_body?: string; ack?: boolean; also_keys?: string[];
+  attachments?: {path?: string; mxc_url?: string; filename?: string}[]};
 export type ProcessState = {incarnation?: number; nonce?: string; counter?: number; notices?: Set<string>; names?: Map<string, string>; active?: Listener};
 export type Options = {agentDir: () => string; endpoint?: () => string; clock?: Clock; fetch?: Fetch;
   autoLoop?: boolean; processState?: (directory: string) => ProcessState; log?: (message: string) => void; lockHooks?: LockHooks; checkpoint?: (name: string) => Promise<void>};
+// The upload side-channel stores what the Content-Type says (it recognises images from their bytes).
+const UPLOAD_TYPES: Record<string, string> = {png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
+  pdf: 'application/pdf', txt: 'text/plain', md: 'text/markdown', csv: 'text/csv', json: 'application/json', html: 'text/html',
+  zip: 'application/zip', mp4: 'video/mp4', mov: 'video/quicktime', mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav'};
 export class Listener {
   pi: Pick<ExtensionAPI, 'sendMessage' | 'appendEntry'>;
   ctx?: ExtensionContext;
@@ -101,12 +108,16 @@ export class Listener {
         this.config = await settings(this.options.agentDir());
         if (!explicit && !this.config.autoStart) { this.status = 'stopped'; return; }
         await mkdir(dir, {recursive: true, mode: 0o700});
+        const endpoint = this.options.endpoint?.() ?? await resolveEndpoint(this.options.agentDir());
+        const token = await credential(this.options.agentDir(), endpoint);
+        let unpause = explicit;
         if (!explicit) {
           const paused = await readFile(join(dir, 'paused.json'), 'utf8').then(JSON.parse, e => { if (e.code !== 'ENOENT') throw e; });
-          if (paused) { this.status = `paused (${paused.reason})`; return; }
+          // A rejected credential that a new sign-in has since replaced no longer holds the
+          // listener back: that sign-in is the owner's fix (Connect again after a delete).
+          if (paused && !(paused.reason === 'credential rejected' && token && await this.replaced(paused, token))) { this.status = `paused (${paused.reason})`; return; }
+          unpause = !!paused;
         }
-        const endpoint = this.options.endpoint?.() ?? process.env.FILAMENT_AGENT_API_BASE_URL ?? 'https://api.filament.dm/mcp/agents';
-        const token = await credential(this.options.agentDir(), endpoint);
         if (!token) { this.status = 'not signed in'; this.notice('credential missing', 'Not signed in. Run pi mcp login filament, then /filament start.'); return; }
         const lock = new ListenerLock(join(dir, 'listener.lock'), {clock: this.clock, hooks: this.options.lockHooks});
         if (reset) await lock.reset();
@@ -117,7 +128,7 @@ export class Listener {
         this.store = new Store(dir, () => this.guard(), message => this.notice(message, message));
         while (!run.abort.signal.aborted) {
           const binding = this.binding();
-          try { await this.initialise(binding, explicit); }
+          try { await this.initialise(binding, unpause); }
           catch (e) { if (this.valid(binding) || run.abort.signal.aborted) throw e; }
           if (this.valid(binding)) break;
         }
@@ -129,6 +140,13 @@ export class Listener {
         else void this.loop(run).catch(e => this.storageError(e, {run, gen: this.generation}));
       } catch (e) { await this.storageError(e); }
     });
+  }
+  // Whether the credential is not the one a 'credential rejected' pause recorded. Pauses written
+  // before the fingerprint was recorded compare the sign-in file's time with the pause's.
+  async replaced(paused: {fingerprint?: string; at?: number}, token: string): Promise<boolean> {
+    if (paused.fingerprint) return paused.fingerprint !== fingerprint(token);
+    const signedIn = await stat(join(this.options.agentDir(), 'mcp-auth.json')).then(s => s.mtimeMs, () => 0);
+    return typeof paused.at === 'number' && signedIn > paused.at;
   }
   async initialise(b: Binding, unpause: boolean) {
     const store = this.store!;
@@ -206,7 +224,7 @@ export class Listener {
   }
   async pause(b: Binding, reason: string) {
     if (!this.valid(b)) return;
-    await this.persist(b, () => this.store!.atomic('paused.json', {reason, at: this.clock.now(), endpoint: b.run.client.endpoint}));
+    await this.persist(b, () => this.store!.atomic('paused.json', {reason, at: this.clock.now(), endpoint: b.run.client.endpoint, fingerprint: b.run.fingerprint}));
     this.status = `paused (${reason})`;
     this.notice(reason, reason === 'credential rejected' ? `Filament rejected ${this.identity?.display_name ?? 'the agent'}'s credential. Run pi mcp login filament, then /filament start.` : 'Finish naming the agent in the Filament app, then run /filament start.');
     await this.halt(b.run);
@@ -320,8 +338,10 @@ export class Listener {
     for (const sender of new Set([...batch.messages, ...recent, ...thread].map(m => m.sender))) {
       if (this.names.has(sender)) continue;
       try {
-        const profile = await call('get_user_profile', {user_id: sender});
-        if (this.valid(b) && !signal.aborted) this.names.set(sender, clean(profile.display_name ?? localpart(sender)));
+        // The server takes `mxid` and answers {mxid, profile: {displayname}}.
+        const profile = await call('get_user_profile', {mxid: sender});
+        const name = profile.profile?.displayname ?? profile.display_name;
+        if (this.valid(b) && !signal.aborted) this.names.set(sender, clean(name ?? localpart(sender)));
       } catch (e) { if (e instanceof FilamentError && e.auth) throw e; }
     }
     const fetched = [...ordered, ...thread]; const media: any[] = []; const seen = new Set<string>();
@@ -384,13 +404,20 @@ export class Listener {
   consume(batches: Batch[], dropIds = true) {
     for (const batch of batches) { this.batches.delete(batch.token); if (dropIds) batch.eventIds.forEach(id => this.inFlight.delete(id)); }
   }
-  reply(params: {reply_key: string; markdown_body?: string; ack?: boolean; also_keys?: string[]}): Promise<string> {
+  reply(params: ReplyParams): Promise<string> {
     const b = this.binding();
     const task = this.replyInner(params, b); b.run.sends.add(task);
     void task.finally(() => b.run.sends.delete(task)).catch(() => {}); return task;
   }
-  async replyInner(params: {reply_key: string; markdown_body?: string; ack?: boolean; also_keys?: string[]}, b: Binding): Promise<string> {
+  async replyInner(params: ReplyParams, b: Binding): Promise<string> {
     await this.admit(b);
+    // Files go up before the reply is recorded, so a failed upload leaves the batch open.
+    let attachments: Attachment[] = [];
+    if (params.ack !== true && params.attachments?.length) {
+      const unknown = [params.reply_key, ...params.also_keys ?? []].find(key => !['open', 'nudged'].includes(this.batches.get(key)?.state ?? ''));
+      if (unknown) throw new Error(`unknown or already used reply_key ${unknown}; nothing sent`);
+      attachments = await this.upload(params.attachments, b);
+    }
     let ackResult: any;
     const result = await this.store!.mutex.run(async () => {
       await this.admit(b);
@@ -408,7 +435,7 @@ export class Listener {
         this.consume(batches); await this.deleteMedia(batches);
         this.pi.appendEntry('filament-replied', {token: params.reply_key, ids, status: 'acked'});
         await this.admit(b);
-        try { ackResult = await b.run.client.callTool('poll_work', {wait_seconds: 0, ack: ids}, 15_000, b.run.abort.signal); }
+        try { ackResult = await b.run.client.callTool('poll_work', {wait_seconds: 0, max_items: 0, ack: ids}, 15_000, b.run.abort.signal); }
         catch (e) {
           if (this.valid(b) && e instanceof FilamentError && e.auth) await this.pause(b, 'credential rejected');
           return 'Acknowledged locally (server acknowledgement unavailable).';
@@ -417,10 +444,10 @@ export class Listener {
         return `Acknowledged locally (server acknowledged ${ackResult.acknowledged ?? 0}).`;
       }
       const body = params.markdown_body?.trim() ?? '';
-      if (!body || /^\s*---\s*$/m.test(body) || /<\/?[a-z][^>]*>/i.test(body) || /@[^\s:()]+:[a-zA-Z0-9.-]+/.test(body.replace(/\[[^\]]+\]\(member:[^)]+\)/g, ''))) throw new Error('Use non-empty markdown, no HTML, horizontal rules or raw ids; fix the body and try again.');
+      if ((!body && !attachments.length) || /^\s*---\s*$/m.test(body) || /<\/?[a-z][^>]*>/i.test(body) || /@[^\s:()]+:[a-zA-Z0-9.-]+/.test(body.replace(/\[[^\]]+\]\(member:[^)]+\)/g, ''))) throw new Error('Use non-empty markdown, no HTML, horizontal rules or raw ids; fix the body and try again.');
       const attempt: Attempt = {id: randomBytes(12).toString('hex'), state: 'attempting', endpoint: b.run.client.endpoint,
         agent_user_id: this.identity!.user_id, tokens: keys, channel_id: batches[0].channel_id, ids,
-        reply_with: structuredClone(batches[0].reply_with!), body, at: this.clock.now()};
+        reply_with: structuredClone(batches[0].reply_with!), body, ...(attachments.length ? {attachments} : {}), at: this.clock.now()};
       await this.options.checkpoint?.('before-attempt');
       await this.persist(b, () => this.store!.attempt(attempt));
       await this.options.checkpoint?.('after-attempt');
@@ -435,11 +462,45 @@ export class Listener {
     if (ackResult && this.valid(b)) await this.processWork(ackResult, b);
     return result;
   }
+  // Reply attachments: a local file is uploaded by the listener's own client (the bytes never pass
+  // through the model); an mxc_url the model already uploaded is passed on. Never Pi's own
+  // directory (credentials), apart from the inbound attachments the listener saved there.
+  async upload(list: NonNullable<ReplyParams['attachments']>, b: Binding): Promise<Attachment[]> {
+    if (list.length > 10) throw new Error('At most 10 attachments per reply; nothing sent');
+    const agentDir = await realpath(this.options.agentDir()).catch(() => this.options.agentDir());
+    const inbound = join(agentDir, 'filament', 'media') + sep;
+    const out: Attachment[] = [];
+    for (const item of list) {
+      const filename = item.filename?.trim() || undefined;
+      if (item.mxc_url && !item.path) {
+        if (!/^mxc:\/\/[^/\s]+\/[^/\s]+$/.test(item.mxc_url)) throw new Error(`Attachment ${item.mxc_url} is not an mxc:// url; give the local file path instead. Nothing sent`);
+        out.push({mxc_url: item.mxc_url, ...(filename ? {filename} : {})}); continue;
+      }
+      if (!item.path?.trim() || item.mxc_url) throw new Error('Each attachment needs a local file path (or an mxc_url), not both; nothing sent');
+      const given = item.path.trim().replace(/^~(?=\/|$)/, homedir());
+      let file: string;
+      try { file = await realpath(resolve(this.ctx?.cwd ?? process.cwd(), given)); } catch { throw new Error(`Attachment ${item.path} not found; nothing sent`); }
+      if ((file === agentDir || file.startsWith(agentDir + sep)) && !file.startsWith(inbound)) throw new Error(`Attachment ${item.path} is in Pi's own settings directory, which is never sent; nothing sent`);
+      const info = await stat(file);
+      if (!info.isFile() || !info.size) throw new Error(`Attachment ${item.path} is not a non-empty file; nothing sent`);
+      if (info.size > 100 * 1024 * 1024) throw new Error(`Attachment ${item.path} is over 100 MB; nothing sent`);
+      const bytes = new Uint8Array(await readFile(file)); const name = filename ?? basename(file);
+      const type = UPLOAD_TYPES[extname(file).slice(1).toLowerCase()] ?? 'application/octet-stream';
+      await this.admit(b);
+      try { out.push({mxc_url: await b.run.client.upload(name, bytes, type, b.run.abort.signal), filename: name}); }
+      catch (e) {
+        if (e instanceof FilamentError && e.auth && this.valid(b)) await this.pause(b, 'credential rejected');
+        throw new Error(`${e instanceof FilamentError ? e.message : 'Upload failed'} for ${item.path}; nothing sent`);
+      }
+    }
+    return out;
+  }
   async sendAttempt(attempt: Attempt, b: Binding): Promise<string> {
     await this.admit(b);
     let state: Attempt['state'] = 'unknown', error: string | undefined, auth = false;
     try {
-      const response = await b.run.client.callTool(attempt.reply_with.tool, {...attempt.reply_with.args, markdown_body: attempt.body}, 30_000, b.run.abort.signal);
+      const response = await b.run.client.callTool(attempt.reply_with.tool, {...attempt.reply_with.args, markdown_body: attempt.body,
+        ...(attempt.attachments?.length ? {attachments: attempt.attachments} : {})}, 30_000, b.run.abort.signal);
       if (typeof response.event_id === 'string' && response.event_id) state = 'posted';
     } catch (e) {
       auth = e instanceof FilamentError && e.auth;

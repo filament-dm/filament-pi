@@ -56,6 +56,9 @@ test('L25b adoption: no own message, exclusions, shared download cap and concurr
     assert.deepEqual(batch.media.map(m => m.filename), ['one.png', 'two.png', 'three.png']);
     await f.listener.reply({reply_key: f.key(), ack: true});
     for (const id of batch.eventIds) assert.equal(f.listener.store!.replied.get(id)?.s, 'acked');
+    // An ack-only call must not hand out new work (max_items 0 applies the ack only).
+    const ackPoll = f.server.polls.at(-1);
+    assert.equal(ackPoll.max_items, 0); assert.deepEqual(new Set(ackPoll.ack), new Set(batch.eventIds));
   }
   for (const own of [{is_from_self: true}, {sender: '@agent:fake.test'}]) {
     const f = await fixture(t); const item = f.server.enqueue('text');

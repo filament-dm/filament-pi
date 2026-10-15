@@ -38,7 +38,7 @@ export class FilamentClient {
     this.endpoint = endpoint.replace(/\/$/, ''); this.#token = token; this.#fetch = fetcher; this.#clock = clock;
   }
   async #request<T>(path: string, body: unknown, timeout: number, signal: AbortSignal | undefined,
-    consume: (response: Response) => Promise<T>): Promise<T> {
+    consume: (response: Response) => Promise<T>, contentType = 'application/json'): Promise<T> {
     const abort = new AbortController();
     const cancel = () => abort.abort();
     signal?.addEventListener('abort', cancel, {once: true});
@@ -53,11 +53,13 @@ export class FilamentClient {
         if (abort.signal.aborted) throw new FilamentError('Request aborted');
         const response = await this.#fetch(this.endpoint + path, {
           method: body === undefined ? 'GET' : 'POST', redirect: 'error', signal: abort.signal,
-          headers: {Authorization: `Bearer ${this.#token}`, 'Content-Type': 'application/json',
+          headers: {Authorization: `Bearer ${this.#token}`, 'Content-Type': contentType,
             Accept: 'application/json, text/event-stream', ...(this.#session ? {'Mcp-Session-Id': this.#session} : {})},
-          body: body === undefined ? undefined : body === '' ? '' : JSON.stringify(body),
+          body: body === undefined ? undefined : body instanceof Uint8Array || body === '' ? body : JSON.stringify(body),
         });
-        if (!path.startsWith('/media') && [401, 403].includes(response.status)) throw new FilamentError('Credential rejected', -32001);
+        // /media and /upload answer 403 for a refused file, not a refused credential.
+        const authStatuses = path.startsWith('/media') ? [] : path.startsWith('/upload') ? [401] : [401, 403];
+        if (authStatuses.includes(response.status)) throw new FilamentError('Credential rejected', -32001);
         const session = response.headers.get('Mcp-Session-Id');
         if (session) this.#session = session;
         return consume(response);
@@ -113,6 +115,15 @@ export class FilamentClient {
       await response.arrayBuffer();
       if (!response.ok) throw new FilamentError(`Heartbeat HTTP ${response.status}`);
     });
+  }
+  // Store a file through the bearer side-channel (POST /upload?filename=…, the bytes as the body).
+  async upload(filename: string, bytes: Uint8Array, contentType: string, signal?: AbortSignal): Promise<string> {
+    return this.#request(`/upload?filename=${encodeURIComponent(filename)}`, bytes, 60_000, signal, async response => {
+      let data: any; try { data = await response.json(); } catch {}
+      if (!response.ok) throw new FilamentError(`Upload refused (HTTP ${response.status}${data?.error ? `: ${data.error}` : ''})`);
+      if (typeof data?.mxc_url !== 'string' || !data.mxc_url.startsWith('mxc://')) throw new FilamentError('Upload failed: no mxc_url');
+      return data.mxc_url;
+    }, contentType);
   }
   async media(mxc: string, signal?: AbortSignal): Promise<Uint8Array> {
     return this.#request(`/media?mxc_url=${encodeURIComponent(mxc)}`, undefined, 15_000, signal, async response => {
