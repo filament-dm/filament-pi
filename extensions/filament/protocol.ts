@@ -51,13 +51,15 @@ export class FilamentClient {
     try {
       const operation = (async () => {
         if (abort.signal.aborted) throw new FilamentError('Request aborted');
-        const response = await this.#fetch(this.endpoint + path, {
-          method: body === undefined ? 'GET' : 'POST', redirect: 'error', signal: abort.signal,
-          headers: {Authorization: `Bearer ${this.#token}`, 'Content-Type': 'application/json',
+        // A signed URL (absolute) is its own credential: it never gets the bearer.
+        const signed = /^https?:\/\//.test(path), raw = body instanceof Uint8Array;
+        const response = await this.#fetch(signed ? path : this.endpoint + path, {
+          method: raw ? 'PUT' : body === undefined ? 'GET' : 'POST', redirect: 'error', signal: abort.signal,
+          headers: signed ? {'Content-Type': 'application/octet-stream', Accept: 'application/json'} : {Authorization: `Bearer ${this.#token}`, 'Content-Type': 'application/json',
             Accept: 'application/json, text/event-stream', ...(this.#session ? {'Mcp-Session-Id': this.#session} : {})},
-          body: body === undefined ? undefined : body === '' ? '' : JSON.stringify(body),
+          body: raw ? body : body === undefined ? undefined : body === '' ? '' : JSON.stringify(body),
         });
-        if (!path.startsWith('/media') && [401, 403].includes(response.status)) throw new FilamentError('Credential rejected', -32001);
+        if (!signed && !path.startsWith('/media') && [401, 403].includes(response.status)) throw new FilamentError('Credential rejected', -32001);
         const session = response.headers.get('Mcp-Session-Id');
         if (session) this.#session = session;
         return consume(response);
@@ -112,6 +114,19 @@ export class FilamentClient {
     return this.#request('/heartbeat', '', 10_000, signal, async response => {
       await response.arrayBuffer();
       if (!response.ok) throw new FilamentError(`Heartbeat HTTP ${response.status}`);
+    });
+  }
+  // Store a file: create_media_upload signs a one-use URL, the bytes go to it. Returns the mxc_url.
+  async upload(filename: string, bytes: Uint8Array, signal?: AbortSignal): Promise<string> {
+    const ticket = await this.callTool('create_media_upload', {filename, bytes: bytes.length}, 15_000, signal);
+    if (typeof ticket.error === 'string') throw new FilamentError(`Upload refused: ${ticket.error}`);
+    if (typeof ticket.upload_url !== 'string' || !/^https?:\/\//.test(ticket.upload_url)) throw new FilamentError('Upload refused: no upload URL');
+    return this.#request(ticket.upload_url, bytes, 60_000, signal, async response => {
+      let data: any; try { data = await response.json(); } catch {}
+      if (!response.ok) throw new FilamentError(`Upload failed (HTTP ${response.status}${data?.error ? `: ${data.error}` : ''})`);
+      const mxc = data?.mxc_url ?? ticket.mxc_url;
+      if (typeof mxc !== 'string' || !mxc.startsWith('mxc://')) throw new FilamentError('Upload failed: no mxc_url');
+      return mxc;
     });
   }
   async media(mxc: string, signal?: AbortSignal): Promise<Uint8Array> {

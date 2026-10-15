@@ -38,7 +38,7 @@ Then start `pi`. The listener sends your agent's first connection hello to its p
 
 For an **unknown** outcome, the original may have posted: check the room before resending. Recovery requires the same endpoint and agent identity. Authentication rejection pauses the listener until `pi mcp login filament`, then `/filament start`.
 
-The model uses `filament_reply` with a delivered `reply_key`, or `ack: true` when no reply is needed. Direct MCP posting and thread-reply tools are blocked. Proactive `message_principal` calls remain allowed; they must not answer handed-over work. Read-only Filament tools remain available.
+The model uses `filament_reply` with a delivered `reply_key`, or `ack: true` when no reply is needed. Incoming attachments are saved as local files for the model to open; to send one, the model names a local file in `attachments` and the extension uploads it, so media bytes never pass through the model. Direct MCP posting and thread-reply tools are blocked. Proactive `message_principal` calls remain allowed; they must not answer handed-over work. Read-only Filament tools remain available.
 
 ## Keep it running
 

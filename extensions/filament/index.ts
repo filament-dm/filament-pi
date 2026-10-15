@@ -9,7 +9,7 @@ export const guidelines = [
   "If nothing needs saying (a thank-you, an emoji), call `filament_reply` with `ack: true` instead; a question or a request always gets an answer in `markdown_body`.",
   "If the ask is unclear, reply with one clarifying question in the same place.",
   "After `filament_reply` returns, end your turn without narrating in the terminal.",
-  "Attachments arrive as local file paths; view images with the `read` tool before replying; never post a path or an `mxc://` url.",
+  "Attachments arrive as local file paths; view images with the `read` tool before replying. To send a file, put its local path in `filament_reply` `attachments`; the extension uploads it. Never post a path or an `mxc://` url in the text.",
   "Never retry a reply. \"Already answered\", \"unknown or already used reply_key\" and \"outcome unknown\" all mean move on; the user sees doubtful replies in `/filament status`."
 ];
 export function blockPosting(toolName: string) {
@@ -19,8 +19,12 @@ export function blockPosting(toolName: string) {
 export function register(pi: ExtensionAPI, Type: any, options: Options): Listener {
   const listener = new Listener(pi, options);
   pi.registerTool({name: 'filament_reply', label: 'Reply on Filament', description: 'Answer or acknowledge a delivered Filament batch.',
-    parameters: Type.Object({reply_key: Type.String(), markdown_body: Type.Optional(Type.String({description: 'Your answer, in markdown. Needed unless ack is true.'})),
-      ack: Type.Optional(Type.Boolean({description: 'true only when nothing needs saying: marks the message handled without posting.'})), also_keys: Type.Optional(Type.Array(Type.String()))}),
+    parameters: Type.Object({reply_key: Type.String(), markdown_body: Type.Optional(Type.String({description: 'Your answer, in markdown. Needed unless ack is true or attachments are given.'})),
+      ack: Type.Optional(Type.Boolean({description: 'true only when nothing needs saying: marks the message handled without posting.'})), also_keys: Type.Optional(Type.Array(Type.String())),
+      attachments: Type.Optional(Type.Array(Type.Object({path: Type.Optional(Type.String({description: 'A local file to send (an image, a PDF, …). The extension uploads it.'})),
+        mxc_url: Type.Optional(Type.String({description: 'Instead of path: an mxc:// url you already uploaded with create_media_upload.'})),
+        filename: Type.Optional(Type.String({description: 'Name to show; defaults to the file name.'}))}),
+        {maxItems: 10, description: 'Files to send with the reply. markdown_body becomes the caption and may be empty.'}))}),
     executionMode: 'sequential', annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true},
     promptSnippet: 'filament_reply: answer a Filament message you were handed (reply_key from its header)', promptGuidelines: guidelines,
     async execute(_id, params) { return {content: [{type: 'text', text: await listener.reply(params as any)}], details: undefined}; },

@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, writeFile, readdir, stat } from 'node:fs/promises';
+import { readFile, writeFile, readdir, stat, mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { FilamentClient, FilamentError } from '../extensions/filament/protocol.ts';
 import { Listener } from '../extensions/filament/listener.ts';
@@ -61,6 +62,25 @@ test('reply validation: empty, HTML, horizontal rule, raw id retain batch; membe
   const f = await fixture(t); f.server.enqueue('A'); await f.poll();
   for (const body of ['', '<b>Hello</b>', 'Hello\n---\nEnd', '@user:fake.test']) { await assert.rejects(f.listener.reply({reply_key: f.key(), markdown_body: body}), /non-empty markdown/); assert.equal(f.listener.batches.size, 1); }
   assert.equal(await f.listener.reply({reply_key: f.key(), markdown_body: 'Hello [User](member:@user:fake.test)'}), 'Posted.');
+});
+test('reply attachments: the extension uploads local files without the bearer, passes mxc urls on; refusals keep the batch', async t => {
+  const f = await fixture(t); f.server.enqueue('A'); await f.poll();
+  const outside = await mkdtemp(join(tmpdir(), 'filament-pi-out-')); t.after(() => rm(outside, {recursive: true, force: true}));
+  await writeFile(join(outside, 'chart.png'), 'chart');
+  await mkdir(join(f.dir, 'filament', 'media'), {recursive: true}); await writeFile(join(f.dir, 'filament', 'media', 'seen.png'), 'seen');
+  const refusals: [any[], RegExp][] = [[[{path: join(f.dir, 'mcp-auth.json')}], /settings directory/], [[{path: join(outside, 'missing.png')}], /not found/],
+    [[{mxc_url: 'https://elsewhere/x.png'}], /not an mxc/], [[{path: outside}], /not a non-empty file/]];
+  for (const [attachments, error] of refusals) await assert.rejects(f.listener.reply({reply_key: f.key(), attachments}), error);
+  f.server.script('create_media_upload', {result: {error: 'file is over the 2-byte upload limit'}});
+  await assert.rejects(f.listener.reply({reply_key: f.key(), attachments: [{path: join(outside, 'chart.png')}]}), /Upload refused: file is over.*nothing sent/);
+  const replies = () => f.server.posts.filter(p => p.name === 'post_message');
+  assert.equal(replies().length, 0); assert.equal(f.server.uploads.length, 0); assert.equal(f.listener.batches.size, 1);
+  assert.equal(await f.listener.reply({reply_key: f.key(), markdown_body: '', attachments: [{path: join(outside, 'chart.png')}, {path: join(f.dir, 'filament', 'media', 'seen.png'), filename: 'photo.png'}, {mxc_url: 'mxc://fake/old'}]}), 'Posted.');
+  assert.deepEqual(replies()[0].args.attachments, [{mxc_url: 'mxc://fake/up-1', filename: 'chart.png'}, {mxc_url: 'mxc://fake/up-2', filename: 'photo.png'}, {mxc_url: 'mxc://fake/old'}]);
+  assert.equal(replies()[0].args.markdown_body, '');
+  assert.deepEqual(f.server.requests.filter(r => r.name === 'create_media_upload').map(r => r.args), [{filename: 'chart.png', bytes: 5}, {filename: 'chart.png', bytes: 5}, {filename: 'photo.png', bytes: 4}]);
+  assert.deepEqual(f.server.uploads.map(u => [u.authorization, u.size]), [[null, 5], [null, 4]]);
+  await assert.rejects(f.listener.reply({reply_key: f.key(), attachments: [{path: join(outside, 'chart.png')}]}), /unknown or already used/); assert.equal(f.server.uploads.length, 2);
 });
 test('L2 additional keys: other channel or missing token refuses whole reply', async t => {
   const f = await fixture(t); f.server.enqueue('A'); f.server.enqueue('B', '!other:fake.test'); await f.poll(); const [a, b] = f.work().map(w => w.details.token);

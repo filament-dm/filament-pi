@@ -1,5 +1,6 @@
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, readFile, realpath, stat, unlink, writeFile } from 'node:fs/promises';
+import { basename, join, resolve, sep } from 'node:path';
+import { homedir } from 'node:os';
 import { createHash, randomBytes } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
@@ -9,13 +10,15 @@ import type { Clock, Fetch } from './protocol.ts';
 import { ListenerLock, ADMISSION } from './lock.ts';
 import type { LockHooks } from './lock.ts';
 import { Store, Mutex } from './state.ts';
-import type { Attempt } from './state.ts';
+import type { Attempt, Attachment } from './state.ts';
 import { render, localpart, clean } from './render.ts';
 import type { Batch, Identity, Item, Message } from './render.ts';
 
 export type Run = {client: FilamentClient; abort: AbortController; polling: AbortController; lock: ListenerLock;
   fingerprint: string; stopping: boolean; timers: Set<unknown>; sends: Set<Promise<unknown>>; cursor?: string; ackIds: string[]; failures: number; namingAt?: number};
 type Binding = {run: Run; gen: number};
+export type ReplyParams = {reply_key: string; markdown_body?: string; ack?: boolean; also_keys?: string[];
+  attachments?: {path?: string; mxc_url?: string; filename?: string}[]};
 export type ProcessState = {incarnation?: number; nonce?: string; counter?: number; notices?: Set<string>; names?: Map<string, string>; active?: Listener};
 export type Options = {agentDir: () => string; endpoint?: () => string; clock?: Clock; fetch?: Fetch;
   autoLoop?: boolean; processState?: (directory: string) => ProcessState; log?: (message: string) => void; lockHooks?: LockHooks; checkpoint?: (name: string) => Promise<void>};
@@ -386,13 +389,20 @@ export class Listener {
   consume(batches: Batch[], dropIds = true) {
     for (const batch of batches) { this.batches.delete(batch.token); if (dropIds) batch.eventIds.forEach(id => this.inFlight.delete(id)); }
   }
-  reply(params: {reply_key: string; markdown_body?: string; ack?: boolean; also_keys?: string[]}): Promise<string> {
+  reply(params: ReplyParams): Promise<string> {
     const b = this.binding();
     const task = this.replyInner(params, b); b.run.sends.add(task);
     void task.finally(() => b.run.sends.delete(task)).catch(() => {}); return task;
   }
-  async replyInner(params: {reply_key: string; markdown_body?: string; ack?: boolean; also_keys?: string[]}, b: Binding): Promise<string> {
+  async replyInner(params: ReplyParams, b: Binding): Promise<string> {
     await this.admit(b);
+    // Files go up before the reply is recorded, so a failed upload leaves the batch open.
+    let attachments: Attachment[] = [];
+    if (params.ack !== true && params.attachments?.length) {
+      const unknown = [params.reply_key, ...params.also_keys ?? []].find(key => !['open', 'nudged'].includes(this.batches.get(key)?.state ?? ''));
+      if (unknown) throw new Error(`unknown or already used reply_key ${unknown}; nothing sent`);
+      attachments = await this.upload(params.attachments, b);
+    }
     let ackResult: any;
     const result = await this.store!.mutex.run(async () => {
       await this.admit(b);
@@ -419,10 +429,10 @@ export class Listener {
         return `Acknowledged locally (server acknowledged ${ackResult.acknowledged ?? 0}).`;
       }
       const body = params.markdown_body?.trim() ?? '';
-      if (!body || /^\s*---\s*$/m.test(body) || /<\/?[a-z][^>]*>/i.test(body) || /@[^\s:()]+:[a-zA-Z0-9.-]+/.test(body.replace(/\[[^\]]+\]\(member:[^)]+\)/g, ''))) throw new Error('Use non-empty markdown, no HTML, horizontal rules or raw ids; fix the body and try again.');
+      if ((!body && !attachments.length) || /^\s*---\s*$/m.test(body) || /<\/?[a-z][^>]*>/i.test(body) || /@[^\s:()]+:[a-zA-Z0-9.-]+/.test(body.replace(/\[[^\]]+\]\(member:[^)]+\)/g, ''))) throw new Error('Use non-empty markdown, no HTML, horizontal rules or raw ids; fix the body and try again.');
       const attempt: Attempt = {id: randomBytes(12).toString('hex'), state: 'attempting', endpoint: b.run.client.endpoint,
         agent_user_id: this.identity!.user_id, tokens: keys, channel_id: batches[0].channel_id, ids,
-        reply_with: structuredClone(batches[0].reply_with!), body, at: this.clock.now()};
+        reply_with: structuredClone(batches[0].reply_with!), body, ...(attachments.length ? {attachments} : {}), at: this.clock.now()};
       await this.options.checkpoint?.('before-attempt');
       await this.persist(b, () => this.store!.attempt(attempt));
       await this.options.checkpoint?.('after-attempt');
@@ -437,11 +447,44 @@ export class Listener {
     if (ackResult && this.valid(b)) await this.processWork(ackResult, b);
     return result;
   }
+  // Reply attachments: a local file is uploaded by the listener's own client (the bytes never pass
+  // through the model); an mxc_url the model already uploaded is passed on. Never Pi's own
+  // directory (credentials), apart from the inbound attachments the listener saved there.
+  async upload(list: NonNullable<ReplyParams['attachments']>, b: Binding): Promise<Attachment[]> {
+    if (list.length > 10) throw new Error('At most 10 attachments per reply; nothing sent');
+    const agentDir = await realpath(this.options.agentDir()).catch(() => this.options.agentDir());
+    const inbound = join(agentDir, 'filament', 'media') + sep;
+    const out: Attachment[] = [];
+    for (const item of list) {
+      const filename = item.filename?.trim() || undefined;
+      if (item.mxc_url && !item.path) {
+        if (!/^mxc:\/\/[^/\s]+\/[^/\s]+$/.test(item.mxc_url)) throw new Error(`Attachment ${item.mxc_url} is not an mxc:// url; give the local file path instead. Nothing sent`);
+        out.push({mxc_url: item.mxc_url, ...(filename ? {filename} : {})}); continue;
+      }
+      if (!item.path?.trim() || item.mxc_url) throw new Error('Each attachment needs a local file path (or an mxc_url), not both; nothing sent');
+      const given = item.path.trim().replace(/^~(?=\/|$)/, homedir());
+      let file: string;
+      try { file = await realpath(resolve(this.ctx?.cwd ?? process.cwd(), given)); } catch { throw new Error(`Attachment ${item.path} not found; nothing sent`); }
+      if ((file === agentDir || file.startsWith(agentDir + sep)) && !file.startsWith(inbound)) throw new Error(`Attachment ${item.path} is in Pi's own settings directory, which is never sent; nothing sent`);
+      const info = await stat(file);
+      if (!info.isFile() || !info.size) throw new Error(`Attachment ${item.path} is not a non-empty file; nothing sent`);
+      if (info.size > 100 * 1024 * 1024) throw new Error(`Attachment ${item.path} is over 100 MB; nothing sent`);
+      const bytes = new Uint8Array(await readFile(file)); const name = filename ?? basename(file);
+      await this.admit(b);
+      try { out.push({mxc_url: await b.run.client.upload(name, bytes, b.run.abort.signal), filename: name}); }
+      catch (e) {
+        if (e instanceof FilamentError && e.auth && this.valid(b)) await this.pause(b, 'credential rejected');
+        throw new Error(`${e instanceof FilamentError ? e.message : 'Upload failed'} for ${item.path}; nothing sent`);
+      }
+    }
+    return out;
+  }
   async sendAttempt(attempt: Attempt, b: Binding): Promise<string> {
     await this.admit(b);
     let state: Attempt['state'] = 'unknown', error: string | undefined, auth = false;
     try {
-      const response = await b.run.client.callTool(attempt.reply_with.tool, {...attempt.reply_with.args, markdown_body: attempt.body}, 30_000, b.run.abort.signal);
+      const response = await b.run.client.callTool(attempt.reply_with.tool, {...attempt.reply_with.args, markdown_body: attempt.body,
+        ...(attempt.attachments?.length ? {attachments: attempt.attachments} : {})}, 30_000, b.run.abort.signal);
       if (typeof response.event_id === 'string' && response.event_id) state = 'posted';
     } catch (e) {
       auth = e instanceof FilamentError && e.auth;
