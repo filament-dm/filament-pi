@@ -410,7 +410,7 @@ export class Listener {
         this.consume(batches); await this.deleteMedia(batches);
         this.pi.appendEntry('filament-replied', {token: params.reply_key, ids, status: 'acked'});
         await this.admit(b);
-        try { ackResult = await b.run.client.callTool('poll_work', {wait_seconds: 0, ack: ids}, 15_000, b.run.abort.signal); }
+        try { ackResult = await b.run.client.callTool('poll_work', {wait_seconds: 0, max_items: 0, ack: ids}, 15_000, b.run.abort.signal); }
         catch (e) {
           if (this.valid(b) && e instanceof FilamentError && e.auth) await this.pause(b, 'credential rejected');
           return 'Acknowledged locally (server acknowledgement unavailable).';

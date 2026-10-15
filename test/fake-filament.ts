@@ -37,6 +37,7 @@ export class FakeFilament {
   server?: Server;
   session = 'fake-session';
   posts: any[] = [];
+  polls: any[] = [];
   constructor(clock: Clock = systemClock) { this.clock = clock; }
   script(name: string, ...scripts: Script[]) { this.scripts.set(name, [...this.scripts.get(name) ?? [], ...scripts]); }
   enqueue(id: string, channel = '!private:fake.test', options: Partial<Message> & {backchannel?: boolean; thread?: string} = {}) {
@@ -80,7 +81,7 @@ export class FakeFilament {
     if (result === undefined) {
       if (name === 'initialize') result = {protocolVersion: '2024-11-05'};
       else if (name === 'get_self') result = this.identity;
-      else if (name === 'poll_work') result = {work: structuredClone([...this.channels.values()]), cursor: 'next', next_poll_ms: 1000, truncated: false, acknowledged: this.acknowledged};
+      else if (name === 'poll_work') { this.polls.push(structuredClone(args ?? {})); result = {work: structuredClone([...this.channels.values()]), cursor: 'next', next_poll_ms: 1000, truncated: false, acknowledged: this.acknowledged}; }
       else if (name === 'get_recent_messages') result = {messages: structuredClone(this.channels.get(args.channel)?.messages ?? [])};
       else if (name === 'get_thread') result = {messages: structuredClone([...this.channels.values()].find(c => c.thread_id === args.message_id)?.messages ?? [])};
       else if (name === 'get_user_profile') result = {mxid: args.mxid, profile: {displayname: 'Sender'}};
