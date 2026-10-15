@@ -63,7 +63,7 @@ test('reply validation: empty, HTML, horizontal rule, raw id retain batch; membe
   for (const body of ['', '<b>Hello</b>', 'Hello\n---\nEnd', '@user:fake.test']) { await assert.rejects(f.listener.reply({reply_key: f.key(), markdown_body: body}), /non-empty markdown/); assert.equal(f.listener.batches.size, 1); }
   assert.equal(await f.listener.reply({reply_key: f.key(), markdown_body: 'Hello [User](member:@user:fake.test)'}), 'Posted.');
 });
-test('reply attachments: the extension uploads local files without the bearer, passes mxc urls on; refusals keep the batch', async t => {
+test('reply attachments: the extension uploads local files itself, passes mxc urls on; refusals keep the batch', async t => {
   const f = await fixture(t); f.server.enqueue('A'); await f.poll();
   const outside = await mkdtemp(join(tmpdir(), 'filament-pi-out-')); t.after(() => rm(outside, {recursive: true, force: true}));
   await writeFile(join(outside, 'chart.png'), 'chart');
@@ -71,16 +71,18 @@ test('reply attachments: the extension uploads local files without the bearer, p
   const refusals: [any[], RegExp][] = [[[{path: join(f.dir, 'mcp-auth.json')}], /settings directory/], [[{path: join(outside, 'missing.png')}], /not found/],
     [[{mxc_url: 'https://elsewhere/x.png'}], /not an mxc/], [[{path: outside}], /not a non-empty file/]];
   for (const [attachments, error] of refusals) await assert.rejects(f.listener.reply({reply_key: f.key(), attachments}), error);
-  f.server.script('create_media_upload', {result: {error: 'file is over the 2-byte upload limit'}});
-  await assert.rejects(f.listener.reply({reply_key: f.key(), attachments: [{path: join(outside, 'chart.png')}]}), /Upload refused: file is over.*nothing sent/);
+  f.server.script('upload', {status: 413, result: {error: 'payload_too_large'}});
+  await assert.rejects(f.listener.reply({reply_key: f.key(), attachments: [{path: join(outside, 'chart.png')}]}), /Upload refused \(HTTP 413: payload_too_large\).*nothing sent/);
   const replies = () => f.server.posts.filter(p => p.name === 'post_message');
-  assert.equal(replies().length, 0); assert.equal(f.server.uploads.length, 0); assert.equal(f.listener.batches.size, 1);
+  assert.equal(replies().length, 0); assert.equal(f.server.uploads.length, 1); assert.equal(f.listener.batches.size, 1); assert.equal(f.listener.status, 'listening');
   assert.equal(await f.listener.reply({reply_key: f.key(), markdown_body: '', attachments: [{path: join(outside, 'chart.png')}, {path: join(f.dir, 'filament', 'media', 'seen.png'), filename: 'photo.png'}, {mxc_url: 'mxc://fake/old'}]}), 'Posted.');
-  assert.deepEqual(replies()[0].args.attachments, [{mxc_url: 'mxc://fake/up-1', filename: 'chart.png'}, {mxc_url: 'mxc://fake/up-2', filename: 'photo.png'}, {mxc_url: 'mxc://fake/old'}]);
+  assert.deepEqual(replies()[0].args.attachments, [{mxc_url: 'mxc://fake/up-2', filename: 'chart.png'}, {mxc_url: 'mxc://fake/up-3', filename: 'photo.png'}, {mxc_url: 'mxc://fake/old'}]);
   assert.equal(replies()[0].args.markdown_body, '');
-  assert.deepEqual(f.server.requests.filter(r => r.name === 'create_media_upload').map(r => r.args), [{filename: 'chart.png', bytes: 5}, {filename: 'chart.png', bytes: 5}, {filename: 'photo.png', bytes: 4}]);
-  assert.deepEqual(f.server.uploads.map(u => [u.authorization, u.size]), [[null, 5], [null, 4]]);
-  await assert.rejects(f.listener.reply({reply_key: f.key(), attachments: [{path: join(outside, 'chart.png')}]}), /unknown or already used/); assert.equal(f.server.uploads.length, 2);
+  assert.deepEqual(f.server.uploads.map(u => [new URL(u.url).search, u.authorization, u.type, u.size]),
+    [['?filename=chart.png', 'Bearer fake-test-credential', 'image/png', 5], ['?filename=chart.png', 'Bearer fake-test-credential', 'image/png', 5], ['?filename=photo.png', 'Bearer fake-test-credential', 'image/png', 4]]);
+  await assert.rejects(f.listener.reply({reply_key: f.key(), attachments: [{path: join(outside, 'chart.png')}]}), /unknown or already used/); assert.equal(f.server.uploads.length, 3);
+  f.server.enqueue('B'); await f.poll(); f.server.script('upload', {status: 401});
+  await assert.rejects(f.listener.reply({reply_key: f.key(), attachments: [{path: join(outside, 'chart.png')}]}), /Credential rejected.*nothing sent/); assert.equal(f.listener.status, 'paused (credential rejected)');
 });
 test('L2 additional keys: other channel or missing token refuses whole reply', async t => {
   const f = await fixture(t); f.server.enqueue('A'); f.server.enqueue('B', '!other:fake.test'); await f.poll(); const [a, b] = f.work().map(w => w.details.token);

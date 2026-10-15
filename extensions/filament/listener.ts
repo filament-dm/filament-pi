@@ -1,5 +1,5 @@
 import { mkdir, readFile, realpath, stat, unlink, writeFile } from 'node:fs/promises';
-import { basename, join, resolve, sep } from 'node:path';
+import { basename, extname, join, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { createHash, randomBytes } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -22,6 +22,10 @@ export type ReplyParams = {reply_key: string; markdown_body?: string; ack?: bool
 export type ProcessState = {incarnation?: number; nonce?: string; counter?: number; notices?: Set<string>; names?: Map<string, string>; active?: Listener};
 export type Options = {agentDir: () => string; endpoint?: () => string; clock?: Clock; fetch?: Fetch;
   autoLoop?: boolean; processState?: (directory: string) => ProcessState; log?: (message: string) => void; lockHooks?: LockHooks; checkpoint?: (name: string) => Promise<void>};
+// The upload side-channel stores what the Content-Type says (it recognises images from their bytes).
+const UPLOAD_TYPES: Record<string, string> = {png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
+  pdf: 'application/pdf', txt: 'text/plain', md: 'text/markdown', csv: 'text/csv', json: 'application/json', html: 'text/html',
+  zip: 'application/zip', mp4: 'video/mp4', mov: 'video/quicktime', mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav'};
 export class Listener {
   pi: Pick<ExtensionAPI, 'sendMessage' | 'appendEntry'>;
   ctx?: ExtensionContext;
@@ -470,8 +474,9 @@ export class Listener {
       if (!info.isFile() || !info.size) throw new Error(`Attachment ${item.path} is not a non-empty file; nothing sent`);
       if (info.size > 100 * 1024 * 1024) throw new Error(`Attachment ${item.path} is over 100 MB; nothing sent`);
       const bytes = new Uint8Array(await readFile(file)); const name = filename ?? basename(file);
+      const type = UPLOAD_TYPES[extname(file).slice(1).toLowerCase()] ?? 'application/octet-stream';
       await this.admit(b);
-      try { out.push({mxc_url: await b.run.client.upload(name, bytes, b.run.abort.signal), filename: name}); }
+      try { out.push({mxc_url: await b.run.client.upload(name, bytes, type, b.run.abort.signal), filename: name}); }
       catch (e) {
         if (e instanceof FilamentError && e.auth && this.valid(b)) await this.pause(b, 'credential rejected');
         throw new Error(`${e instanceof FilamentError ? e.message : 'Upload failed'} for ${item.path}; nothing sent`);

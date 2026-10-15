@@ -37,7 +37,7 @@ export class FakeFilament {
   server?: Server;
   session = 'fake-session';
   posts: any[] = [];
-  uploads: {url: string; authorization: string | null; size: number}[] = [];
+  uploads: {url: string; authorization: string | null; type: string | null; size: number}[] = [];
   polls: any[] = [];
   constructor(clock: Clock = systemClock) { this.clock = clock; }
   script(name: string, ...scripts: Script[]) { this.scripts.set(name, [...this.scripts.get(name) ?? [], ...scripts]); }
@@ -50,7 +50,7 @@ export class FakeFilament {
   }
   count(name: string) { return this.requests.filter(r => r.name === name).length; }
   fetch: Fetch = async (url, init) => {
-    const upload = url.includes('/upload/signed/');
+    const upload = url.includes('/upload?');
     const body = init.body && !upload ? JSON.parse(String(init.body)) : undefined;
     const name = upload ? 'upload' : url.includes('/media?') ? 'media' : url.endsWith('/heartbeat') ? 'heartbeat' : body?.method === 'tools/call' ? body.params.name : body?.method;
     const args = body?.params?.arguments;
@@ -74,7 +74,8 @@ export class FakeFilament {
       }}), {status: script?.status ?? this.mediaStatus});
     }
     if (name === 'upload') {
-      this.uploads.push({url, authorization: new Headers(init.headers).get('Authorization'), size: (init.body as Uint8Array).length});
+      const headers = new Headers(init.headers);
+      this.uploads.push({url, authorization: headers.get('Authorization'), type: headers.get('Content-Type'), size: (init.body as Uint8Array).length});
       return Response.json(script?.result ?? {mxc_url: `mxc://fake/up-${this.uploads.length}`}, {status: script?.status ?? 200});
     }
     if (name === 'heartbeat') return new Response('', {status: script?.status ?? 200});
@@ -90,7 +91,6 @@ export class FakeFilament {
       else if (name === 'poll_work') { this.polls.push(structuredClone(args ?? {})); result = {work: structuredClone([...this.channels.values()]), cursor: 'next', next_poll_ms: 1000, truncated: false, acknowledged: this.acknowledged}; }
       else if (name === 'get_recent_messages') result = {messages: structuredClone(this.channels.get(args.channel)?.messages ?? [])};
       else if (name === 'get_thread') result = {messages: structuredClone([...this.channels.values()].find(c => c.thread_id === args.message_id)?.messages ?? [])};
-      else if (name === 'create_media_upload') { const n = this.count('create_media_upload'); result = {upload_url: `${this.endpoint}/upload/signed/t${n}`, method: 'PUT', mxc_url: `mxc://fake/up-${n}`, max_bytes: 1000}; }
       else if (name === 'get_user_profile') result = {mxid: args.mxid, profile: {displayname: 'Sender'}};
       else if (['post_message', 'reply_in_thread', 'message_principal'].includes(name)) {
         result = {event_id: `$posted-${this.posts.length + 1}`}; this.posts.push({name, args});
