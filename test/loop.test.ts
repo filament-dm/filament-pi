@@ -69,6 +69,9 @@ for (const error of [{status: 401}, {status: 403}, {error: -32001}]) test(`L9 er
   assert.match(f.listener.status, /paused/); assert.equal(f.listener.current!.lock.ownsLock, false); assert.equal(f.listener.current!.timers.size, 0);
   const count = f.server.requests.length; await f.clock.tick(120_000); await f.poll(); assert.equal(f.server.requests.length, count);
   assert.equal(JSON.parse(await readFile(join(f.dir, 'filament', 'paused.json'), 'utf8')).reason, 'credential rejected');
+  // It may be a deleted agent: the notice and status point to Connect as well as to a sign-in.
+  assert.ok(f.notices.some(n => /deleted in Filament, press Connect there.*pi mcp login filament/.test(n)));
+  assert.match(f.listener.statusObject().instruction!, /deleted in Filament, press Connect there.*pi mcp login filament, then \/filament start/);
 });
 test('L9 errors: a credential-rejected pause lifts on start only once a new sign-in replaced the credential', async t => {
   const f = await fixture(t); f.server.script('poll_work', {status: 401});
