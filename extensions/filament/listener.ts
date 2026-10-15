@@ -26,6 +26,9 @@ export type Options = {agentDir: () => string; endpoint?: () => string; clock?: 
 const UPLOAD_TYPES: Record<string, string> = {png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
   pdf: 'application/pdf', txt: 'text/plain', md: 'text/markdown', csv: 'text/csv', json: 'application/json', html: 'text/html',
   zip: 'application/zip', mp4: 'video/mp4', mov: 'video/quicktime', mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav'};
+// A rejected credential is also what a deleted agent looks like from here, and then a bare sign-in
+// would make an unplanned new agent: the owner's step is Connect in the app, which starts the setup.
+const REJECTED = 'If this agent was deleted in Filament, press Connect there and send me its setup message again; otherwise run pi mcp login filament, then /filament start.';
 export class Listener {
   pi: Pick<ExtensionAPI, 'sendMessage' | 'appendEntry'>;
   ctx?: ExtensionContext;
@@ -226,7 +229,7 @@ export class Listener {
     if (!this.valid(b)) return;
     await this.persist(b, () => this.store!.atomic('paused.json', {reason, at: this.clock.now(), endpoint: b.run.client.endpoint, fingerprint: b.run.fingerprint}));
     this.status = `paused (${reason})`;
-    this.notice(reason, reason === 'credential rejected' ? `Filament rejected ${this.identity?.display_name ?? 'the agent'}'s credential. Run pi mcp login filament, then /filament start.` : 'Finish naming the agent in the Filament app, then run /filament start.');
+    this.notice(reason, reason === 'credential rejected' ? `Filament rejected ${this.identity?.display_name ?? 'the agent'}'s credential. ${REJECTED}` : 'Finish naming the agent in the Filament app, then run /filament start.');
     await this.halt(b.run);
   }
   async halt(run: Run) {
@@ -554,7 +557,7 @@ export class Listener {
       attempts: [...this.store?.attempts.values() ?? []].map(a => ({id: a.id, state: a.state, body: a.body.slice(0, 80),
         ...(a.state === 'unknown' ? {warning: 'the original may have posted; check the room before resending'} : {})})),
       repliedBytes: this.store?.size ?? 0, warnings: this.config.warnings,
-      instruction: this.status === 'not signed in' || this.status.includes('credential rejected') ? 'Run pi mcp login filament, then /filament start.' :
+      instruction: this.status === 'not signed in' ? 'Run pi mcp login filament, then /filament start.' : this.status.includes('credential rejected') ? REJECTED :
         this.status.includes('naming') || this.status.includes('not named') ? 'Finish naming the agent in the Filament app, then run /filament start.' :
         this.status.startsWith('lock error') ? 'Run /filament start --reset-lock.' : this.status.startsWith('paused') ? 'Run /filament start.' : undefined};
   }
