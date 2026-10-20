@@ -123,7 +123,7 @@ test('L18 bypass: posting that answers delivered work is blocked, every other po
   for (const tool of ['message_principal', 'get_thread', 'react', 'post_rechat', 'create_channel']) assert.equal(blockPosting(`mcp__filament__${tool}`, {channel: '!room:fake.test'}, batches()), undefined);
   await f.listener.reply({reply_key: [...f.listener.batches.keys()][0], ack: true});
   assert.equal(blockPosting('mcp__filament__post_message', {channel: '!room:fake.test'}, batches()), undefined);
-  assert.equal(guidelines.length, 9);
+  assert.equal(guidelines.length, 12);
 });
 test('L19 settings: missing defaults, wait clamp, unknown warning', async t => {
   const f = await fixture(t); assert.deepEqual(await settings(f.dir), {wait: 30, autoStart: true, contextMessages: 25, toolsRefreshMinutes: 60, warnings: []});

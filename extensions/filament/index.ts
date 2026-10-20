@@ -13,7 +13,10 @@ export const guidelines = [
   "After `filament_reply` returns, end your turn without narrating in the terminal.",
   "Attachments arrive as local file paths; view images with the `read` tool before replying. To send a file, put its local path in `filament_reply` `attachments`; the extension uploads it. Never post a path or an `mxc://` url in the text.",
   "Never retry a reply. \"Already answered\", \"unknown or already used reply_key\" and \"outcome unknown\" all mean move on; the user sees doubtful replies in `/filament status`.",
-  "Every Filament tool is yours to use (`<filament_tools>` lists them): search and read, post, react, forward, join channels and more. Before saying you don't know something, look it up with `mcp__filament__search_messages`."
+  "Every Filament tool is yours to use (`<filament_tools>` lists them): search and read, post, react, forward, join channels and more. Before saying you don't know something, look it up with `mcp__filament__search_messages`.",
+  "Put links behind a few words, [like this](https://example.com), never a bare long URL. Link Filament things instead of naming their ids: [Name](member:@user:server) mentions a member, [Name](channel:!id:server) and [Name](group:!id:server) link a channel or group, [text](message:$id) links one message.",
+  "If something you tried failed (a site that won't load, a command that errored, a tool you expected that isn't there), say so plainly in your reply. Never guess or make up what it would have said. Look for a missing tool before you conclude it's gone.",
+  "Never promise to do something later unless something will actually wake you to do it. Otherwise do it now, or say you can't follow up on your own."
 ];
 // Answering delivered work directly would bypass the duplicate-reply protection; any other post is allowed.
 export function blockPosting(toolName: string, input?: Record<string, unknown>, batches: Iterable<Batch> = []) {
