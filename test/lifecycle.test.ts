@@ -111,7 +111,7 @@ test('L17 admission: lost lock refuses reply, ack and hello with no requests', a
 test('L18 bypass: direct posting always blocked, principal ping and reads allowed', () => {
   for (const tool of ['post_message', 'reply_in_thread']) for (const _owned of [true, false]) assert.deepEqual(blockPosting(`mcp__filament__${tool}`), {block: true, reason: 'reply to Filament messages through filament_reply'});
   for (const tool of ['message_principal', 'get_thread']) assert.equal(blockPosting(`mcp__filament__${tool}`), undefined);
-  assert.equal(guidelines.length, 8);
+  assert.equal(guidelines.length, 11);
 });
 test('L19 settings: missing defaults, wait clamp, unknown warning', async t => {
   const f = await fixture(t); assert.deepEqual(await settings(f.dir), {wait: 30, autoStart: true, contextMessages: 25, warnings: []});

@@ -10,7 +10,10 @@ export const guidelines = [
   "If the ask is unclear, reply with one clarifying question in the same place.",
   "After `filament_reply` returns, end your turn without narrating in the terminal.",
   "Attachments arrive as local file paths; view images with the `read` tool before replying. To send a file, put its local path in `filament_reply` `attachments`; the extension uploads it. Never post a path or an `mxc://` url in the text.",
-  "Never retry a reply. \"Already answered\", \"unknown or already used reply_key\" and \"outcome unknown\" all mean move on; the user sees doubtful replies in `/filament status`."
+  "Never retry a reply. \"Already answered\", \"unknown or already used reply_key\" and \"outcome unknown\" all mean move on; the user sees doubtful replies in `/filament status`.",
+  "Put links behind a few words, [like this](https://example.com), never a bare long URL. Link Filament things instead of naming their ids: [Name](member:@user:server) mentions a member, [Name](channel:!id:server) and [Name](group:!id:server) link a channel or group, [text](message:$id) links one message.",
+  "If something you tried failed (a site that won't load, a command that errored, a tool you expected that isn't there), say so plainly in your reply. Never guess or make up what it would have said. Look for a missing tool before you conclude it's gone.",
+  "Never promise to do something later unless something will actually wake you to do it. Otherwise do it now, or say you can't follow up on your own."
 ];
 export function blockPosting(toolName: string) {
   if (['mcp__filament__post_message', 'mcp__filament__reply_in_thread'].includes(toolName))
