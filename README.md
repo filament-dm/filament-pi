@@ -35,10 +35,18 @@ Then start `pi`. The listener sends your agent's first connection hello to its p
 | `/filament hello` | Send another connection hello. |
 | `/filament resync` | Discard pending reply keys and fetch outstanding messages again. |
 | `/filament resend <attempt id>` | Send a saved doubtful or rejected reply once, using its original target. |
+| `/filament tools` | Fetch Filament's tool list now and show it. |
 
 For an **unknown** outcome, the original may have posted: check the room before resending. Recovery requires the same endpoint and agent identity. Authentication rejection pauses the listener until `pi mcp login filament`, then `/filament start`.
 
-The model uses `filament_reply` with a delivered `reply_key`, or `ack: true` when no reply is needed. Incoming attachments are saved as local files for the model to open; to send one, the model names a local file in `attachments` and the extension uploads it, so media bytes never pass through the model. Direct MCP posting and thread-reply tools are blocked. Proactive `message_principal` calls remain allowed; they must not answer handed-over work. Read-only Filament tools remain available.
+The model uses `filament_reply` with a delivered `reply_key`, or `ack: true` when no reply is needed. Incoming attachments are saved as local files for the model to open; to send one, the model names a local file in `attachments` and the extension uploads it, so media bytes never pass through the model. Every other Filament tool is available to the model: search, read, post, react, forward, join channels and the rest. The one exception: while a delivered message is open, a `post_message` into its channel or a `reply_in_thread` to it is blocked, because answers go through `filament_reply` and its duplicate protection. Proactive `message_principal` calls remain allowed; they must not answer handed-over work.
+
+## Filament's tools stay current
+
+Pi lists an MCP server's tools once per connection, and Filament does not announce changes, so a Pi left running would keep the tools it started with. The listener fetches Filament's tool list when it connects and every `toolsRefreshMinutes` (default 60), and:
+
+- puts the current list, one line per tool, in the system prompt as `<filament_tools>`. Pi exposes MCP tools through `codemode` by default and does not name them to the model, so this is how the model knows what it can call.
+- when Pi's own `filament` server is missing tools Filament now offers (or still offers ones it dropped), runs `/mcp reconnect filament` at the next idle moment, once per tool list. A busy agent is never interrupted.
 
 ## Keep it running
 
@@ -60,15 +68,15 @@ State lives in `<agentDir>/filament/`, normally `~/.pi/agent/filament/`. Pi's `g
 - `attempts.jsonl` retains recovery bodies and targets; successful attempts have tombstones and disappear from recovery status.
 - `hello.json`, `paused.json`, `incarnation` and `media/` track connection state, reply-key identity and downloaded attachments.
 
-The credential is read from Pi's `mcp-auth.json`, never changed or copied to package state. New state files use private permissions. The journals grow without compaction in v0.1.0; status reports the suppression journal's size. Recovery bodies can contain private conversation text.
+The credential is read from Pi's `mcp-auth.json`, never changed or copied to package state. New state files use private permissions. The journals grow without compaction; status reports the suppression journal's size. Recovery bodies can contain private conversation text.
 
 Optional `<agentDir>/filament.json`:
 
 ```json
-{"wait": 30, "autoStart": true, "contextMessages": 25}
+{"wait": 30, "autoStart": true, "contextMessages": 25, "toolsRefreshMinutes": 60}
 ```
 
-`wait` is an integer clamped to 1-60 seconds. `contextMessages` defaults to 25 and is clamped to 1-100. Unknown settings appear as warnings in status. The listener talks to the URL you registered with `pi mcp add filament --url …` (the user-level `<agentDir>/mcp.json`) and reads the credential `pi mcp login filament` stored for it; with no `filament` server it uses production. `FILAMENT_AGENT_API_BASE_URL` overrides the **full MCP endpoint URL** and its credential lookup key; heartbeat and media URLs are derived from it.
+`wait` is an integer clamped to 1-60 seconds. `contextMessages` defaults to 25 and is clamped to 1-100. `toolsRefreshMinutes` defaults to 60 and is clamped to 5-1440. Unknown settings appear as warnings in status. The listener talks to the URL you registered with `pi mcp add filament --url …` (the user-level `<agentDir>/mcp.json`) and reads the credential `pi mcp login filament` stored for it; with no `filament` server it uses production. `FILAMENT_AGENT_API_BASE_URL` overrides the **full MCP endpoint URL** and its credential lookup key; heartbeat and media URLs are derived from it.
 
 ## Delivery guarantee
 

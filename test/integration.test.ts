@@ -37,8 +37,12 @@ test('factory registrations: no I/O, tools and handlers wired; print/json never 
   assert.equal(dirs, 0); const requests = f.server.requests.length;
   await handlers.get('session_start')({reason: 'resume'}, f.ctx); assert.equal(listener.status, 'listening');
   f.server.enqueue('A'); await listener.pollOnce(false); const key = [...listener.batches.keys()][0];
+  assert.equal(handlers.get('tool_call')({toolName: 'mcp__filament__post_message', input: {channel: '!private:fake.test'}}).block, true);
+  assert.equal(handlers.get('tool_call')({toolName: 'mcp__filament__post_message', input: {channel: '!elsewhere:fake.test'}}), undefined);
+  const prompt = {systemPromptOptions: {sections: {} as Record<string, string>}}; handlers.get('before_agent_start')(prompt);
+  assert.match(prompt.systemPromptOptions.sections.filament_tools, /- mcp__filament__post_message: Fake post_message\.\n/);
   const result = await tools[0].execute('id', {reply_key: key, ack: true}); assert.equal(result.content[0].type, 'text'); assert.ok('details' in result);
-  assert.equal(handlers.get('tool_call')({toolName: 'mcp__filament__post_message'}).block, true);
+  assert.equal(handlers.get('tool_call')({toolName: 'mcp__filament__post_message', input: {channel: '!private:fake.test'}}), undefined);
   assert.equal((await tools[1].execute()).details.status, 'listening');
   await handlers.get('session_tree')({}); assert.equal(listener.batches.size, 0);
   await commands.get('filament').handler('status', f.ctx); await handlers.get('session_shutdown')({}); assert.ok(f.server.requests.length > requests);

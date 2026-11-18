@@ -4,11 +4,11 @@ import { join } from 'node:path';
 import { Listener } from '../extensions/filament/listener.ts';
 import type { Options } from '../extensions/filament/listener.ts';
 import { FakeClock, FakeFilament, flush } from './fake-filament.ts';
-export async function fixture(t: any, overrides: Partial<Options> = {}) {
+export async function fixture(t: any, overrides: Partial<Options> = {}, piExtras: Record<string, unknown> = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'filament-pi-'));
   const clock = new FakeClock(), server = new FakeFilament(clock);
   const messages: any[] = [], entries: any[] = [], notices: string[] = [];
-  const pi: any = {sendMessage: (message: any, options: any) => messages.push({...message, options}), appendEntry: (type: string, data: any) => entries.push({type, data})};
+  const pi: any = {sendMessage: (message: any, options: any) => messages.push({...message, options}), appendEntry: (type: string, data: any) => entries.push({type, data}), ...piExtras};
   const ctx: any = {mode: 'rpc', hasUI: true, isIdle: () => true, ui: {notify: (message: string) => notices.push(message)}, sessionManager: {getSessionId: () => 'test-session', getBranch: () => [], getEntries: () => []}};
   await writeFile(join(dir, 'mcp-auth.json'), JSON.stringify({[`mcp__filament|${server.endpoint}`]: {tokens: {access_token: 'fake-test-credential'}}}), {mode: 0o600});
   // What `pi mcp add filament --url …` writes; used when a test drops the endpoint option.

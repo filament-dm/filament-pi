@@ -40,6 +40,7 @@ export async function settings(agentDir: string) {
   return {
     wait: integer(data.wait, 30, 1, 60), autoStart: data.autoStart !== false,
     contextMessages: integer(data.contextMessages, 25, 1, 100),
-    warnings: Object.keys(data).filter(k => !['wait', 'autoStart', 'contextMessages'].includes(k)).map(k => `Unknown setting: ${k}`),
+    toolsRefreshMinutes: integer(data.toolsRefreshMinutes, 60, 5, 1440),
+    warnings: Object.keys(data).filter(k => !['wait', 'autoStart', 'contextMessages', 'toolsRefreshMinutes'].includes(k)).map(k => `Unknown setting: ${k}`),
   };
 }

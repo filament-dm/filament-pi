@@ -24,6 +24,7 @@ export class FilamentError extends Error {
   }
 }
 export type Fetch = (url: string, init: RequestInit) => Promise<Response>;
+export type ToolInfo = {name: string; description: string};
 
 export class FilamentClient {
   readonly endpoint: string;
@@ -95,7 +96,7 @@ export class FilamentClient {
     if (this.#ready) return;
     if (!this.#handshake) this.#handshake = (async () => {
       const deadline = this.#clock.now() + 15_000;
-      await this.#rpc('initialize', {protocolVersion: '2025-03-26', capabilities: {}, clientInfo: {name: 'filament-pi', version: '0.1.0'}}, 15_000, signal);
+      await this.#rpc('initialize', {protocolVersion: '2025-03-26', capabilities: {}, clientInfo: {name: 'filament-pi', version: '0.2.0'}}, 15_000, signal);
       await this.#rpc('notifications/initialized', {}, Math.max(1, deadline - this.#clock.now()), signal, true);
       this.#ready = true;
     })().finally(() => { this.#handshake = undefined; });
@@ -109,6 +110,19 @@ export class FilamentClient {
       if (!parsed || typeof parsed !== 'object') throw new Error();
       return parsed;
     } catch { throw new FilamentError('Malformed tool result'); }
+  }
+  // The tools this agent's server offers now (they change with deploys and feature flags).
+  async listTools(signal?: AbortSignal): Promise<ToolInfo[]> {
+    const tools: ToolInfo[] = []; let cursor: string | undefined;
+    for (let page = 0; page < 20; page++) {
+      const result = await this.#rpc('tools/list', cursor ? {cursor} : {}, 15_000, signal);
+      if (!Array.isArray(result?.tools)) throw new FilamentError('Malformed tools list');
+      for (const tool of result.tools) if (typeof tool?.name === 'string' && tool.name)
+        tools.push({name: tool.name, description: typeof tool.description === 'string' ? tool.description : ''});
+      cursor = typeof result.nextCursor === 'string' && result.nextCursor ? result.nextCursor : undefined;
+      if (!cursor) break;
+    }
+    return tools;
   }
   async heartbeat(signal?: AbortSignal) {
     return this.#request('/heartbeat', '', 10_000, signal, async response => {
