@@ -14,6 +14,7 @@ import { Store, Mutex } from './state.ts';
 import type { Attempt, Attachment } from './state.ts';
 import { render, localpart, clean } from './render.ts';
 import type { Batch, Identity, Item, Message } from './render.ts';
+import { lookAround } from './look-around.ts';
 
 export type Run = {client: FilamentClient; abort: AbortController; polling: AbortController; lock: ListenerLock;
   fingerprint: string; stopping: boolean; timers: Set<unknown>; sends: Set<Promise<unknown>>; cursor?: string; ackIds: string[]; failures: number; namingAt?: number};
@@ -591,8 +592,26 @@ export class Listener {
       const posted = response?.event_id;
       await this.persist(b, () => this.store!.atomic('hello.json', {...record, ...(posted ? {sentAt: this.clock.now(), eventId: posted} : {failedAt: this.clock.now(), error: 'Hello failed or outcome unknown'})}));
       if (failure instanceof FilamentError && failure.auth) await this.pause(b, 'credential rejected');
+      // First hello ever for this agent: no earlier one was recorded as sent under its identity.
+      const known = prior?.sentAt !== undefined && prior.endpoint === record.endpoint && prior.agent_user_id === record.agent_user_id;
+      if (posted && !force && !known) await this.lookAround(b).catch(() => {});
       return posted ? 'Hello sent.' : 'Hello failed; will retry on the next start.';
     });
+  }
+  // Hands the agent the look-around step as a turn, at most once per agent identity. The marker is
+  // written before the hand-over, so a crash can lose the step but never repeat it; any failure
+  // skips it without touching the listener.
+  async lookAround(b: Binding) {
+    const identity = this.identity, store = this.store;
+    if (!identity || !store || !this.valid(b) || b.run.stopping) return;
+    const agent = {endpoint: b.run.client.endpoint, agent_user_id: identity.user_id};
+    const marker = await store.read('look-around.json');
+    const agents: any[] = Array.isArray(marker?.agents) ? marker.agents : [];
+    if (agents.some(a => a?.endpoint === agent.endpoint && a?.agent_user_id === agent.agent_user_id)) return;
+    await this.scope.run(b, () => store.atomic('look-around.json', {agents: [...agents, {...agent, at: this.clock.now()}]}));
+    if (!this.valid(b) || b.run.stopping) return;
+    this.pi.sendMessage({customType: 'filament-look-around', display: true, content: lookAround(identity), details: agent},
+      {triggerTurn: true, deliverAs: this.ctx?.isIdle() ? undefined : 'followUp'});
   }
   statusObject() {
     return {identity: this.identity, status: this.status, pid: process.pid, generation: this.generation,
