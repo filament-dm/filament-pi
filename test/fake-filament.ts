@@ -39,6 +39,8 @@ export class FakeFilament {
   posts: any[] = [];
   uploads: {url: string; authorization: string | null; type: string | null; size: number}[] = [];
   polls: any[] = [];
+  tools: {name: string; description: string}[] = ['get_self', 'poll_work', 'post_message', 'reply_in_thread', 'message_principal', 'get_recent_messages', 'get_thread', 'get_user_profile']
+    .map(name => ({name, description: `Fake ${name}. Second sentence.`}));
   constructor(clock: Clock = systemClock) { this.clock = clock; }
   script(name: string, ...scripts: Script[]) { this.scripts.set(name, [...this.scripts.get(name) ?? [], ...scripts]); }
   enqueue(id: string, channel = '!private:fake.test', options: Partial<Message> & {backchannel?: boolean; thread?: string} = {}) {
@@ -87,6 +89,7 @@ export class FakeFilament {
     let result: any = script?.result;
     if (result === undefined) {
       if (name === 'initialize') result = {protocolVersion: '2024-11-05'};
+      else if (name === 'tools/list') result = {tools: structuredClone(this.tools)};
       else if (name === 'get_self') result = this.identity;
       else if (name === 'poll_work') { this.polls.push(structuredClone(args ?? {})); result = {work: structuredClone([...this.channels.values()]), cursor: 'next', next_poll_ms: 1000, truncated: false, acknowledged: this.acknowledged}; }
       else if (name === 'get_recent_messages') result = {messages: structuredClone(this.channels.get(args.channel)?.messages ?? [])};
@@ -101,7 +104,7 @@ export class FakeFilament {
         }
       } else result = {};
     }
-    const payload = {jsonrpc: '2.0', id: body.id, result: name === 'initialize' ? result : {content: [{type: 'text', text: JSON.stringify(result)}]}};
+    const payload = {jsonrpc: '2.0', id: body.id, result: name === 'initialize' || name === 'tools/list' ? result : {content: [{type: 'text', text: JSON.stringify(result)}]}};
     const headers = {'Mcp-Session-Id': this.session};
     return script?.sse ? new Response(`data: {}\n\ndata: ${JSON.stringify(payload)}\n\ndata: [DONE]\n`, {headers: {...headers, 'Content-Type': 'text/event-stream'}}) : Response.json(payload, {headers});
   };

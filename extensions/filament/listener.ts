@@ -6,7 +6,8 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { credential, endpoint as resolveEndpoint, fingerprint, settings } from './credential.ts';
 import { FilamentClient, FilamentError, sleep, systemClock } from './protocol.ts';
-import type { Clock, Fetch } from './protocol.ts';
+import type { Clock, Fetch, ToolInfo } from './protocol.ts';
+import { catalog, digest, drift } from './tools.ts';
 import { ListenerLock, ADMISSION } from './lock.ts';
 import type { LockHooks } from './lock.ts';
 import { Store, Mutex } from './state.ts';
@@ -30,7 +31,7 @@ const UPLOAD_TYPES: Record<string, string> = {png: 'image/png', jpg: 'image/jpeg
 // would make an unplanned new agent: the owner's step is Connect in the app, which starts the setup.
 const REJECTED = 'If this agent was deleted in Filament, press Connect there and send me its setup message again; otherwise run pi mcp login filament, then /filament start.';
 export class Listener {
-  pi: Pick<ExtensionAPI, 'sendMessage' | 'appendEntry'>;
+  pi: Pick<ExtensionAPI, 'sendMessage' | 'appendEntry'> & Partial<Pick<ExtensionAPI, 'getAllTools' | 'sendUserMessage'>>;
   ctx?: ExtensionContext;
   options: Options;
   clock: Clock;
@@ -46,7 +47,12 @@ export class Listener {
   identity?: Identity;
   status = 'stopped';
   lastPoll?: number;
-  config = {wait: 30, autoStart: true, contextMessages: 25, warnings: [] as string[]};
+  config = {wait: 30, autoStart: true, contextMessages: 25, toolsRefreshMinutes: 60, warnings: [] as string[]};
+  tools?: ToolInfo[];
+  toolsAt?: number;
+  // The server tool list Pi's MCP client was last asked to reconnect for, and one still waiting for an idle moment.
+  reconnectedFor?: string;
+  reconnectPending?: string;
   processState: ProcessState = {};
   get incarnation() { return this.processState.incarnation; }
   set incarnation(value: number | undefined) { this.processState.incarnation = value; }
@@ -196,10 +202,47 @@ export class Listener {
       owner: {display_name: clean(self.owner?.display_name ?? 'principal')}, cc_room_id: self.cc_room_id};
     await this.hello(false, b);
     if (!this.valid(b)) return false;
+    await this.refreshTools(b);
+    if (!this.valid(b)) return false;
     this.status = 'listening'; b.run.failures = 0;
     this.repeat(b.run, 25_000, async binding => { await b.run.client.heartbeat(b.run.polling.signal); if (!this.valid(binding)) return; });
+    this.repeat(b.run, this.config.toolsRefreshMinutes * 60_000, binding => this.refreshTools(binding));
     return true;
   }
+  // Pi's MCP client lists the server's tools once per connection and the server announces no
+  // changes, so a long-running Pi would keep the tools it started with. Fetch the list here.
+  async refreshTools(b: Binding): Promise<string> {
+    let tools: ToolInfo[];
+    try { tools = await b.run.client.listTools(b.run.polling.signal); }
+    catch (e) {
+      if (e instanceof FilamentError && e.auth) throw e;
+      (this.options.log ?? (s => console.error(s)))(`[filament] tool list refresh failed: ${(e as Error).message}`);
+      return 'Tool list refresh failed; keeping the previous list.';
+    }
+    if (!this.valid(b)) return 'Tool list refresh discarded.';
+    this.tools = tools; this.toolsAt = this.clock.now();
+    this.syncTools();
+    return `${tools.length} Filament tools.`;
+  }
+  // When Pi's MCP client is missing tools the server now offers (or still offers dropped ones),
+  // reconnect it once per server list, at the next idle moment so no run is interrupted.
+  syncTools() {
+    if (!this.tools || !this.pi.getAllTools) return;
+    const {missing, withdrawn, known} = drift(this.tools, this.pi.getAllTools());
+    const key = digest(this.tools);
+    // No Filament tools at all: Pi's server is still connecting, disabled or signed out; nothing to refresh.
+    if (!known || (!missing.length && !withdrawn.length) || this.reconnectedFor === key) { this.reconnectPending = undefined; return; }
+    this.reconnectPending = key; this.reconnectMcp();
+  }
+  reconnectMcp() {
+    const key = this.reconnectPending;
+    if (!key || !this.pi.sendUserMessage || !this.ctx || this.ctx.mode === 'print' || this.ctx.mode === 'json' || !this.ctx.isIdle()) return;
+    this.reconnectPending = undefined; this.reconnectedFor = key;
+    try { this.pi.sendUserMessage('/mcp reconnect filament', {expandPromptTemplates: true}); }
+    catch (e) { (this.options.log ?? (s => console.error(s)))(`[filament] MCP reconnect failed: ${(e as Error).message}`); }
+  }
+  // The system prompt section listing the server's current tools.
+  promptSection(): string | undefined { return this.tools?.length ? catalog(this.tools) : undefined; }
   async loop(run: Run) {
     let connected = false;
     while (this.current === run && !run.abort.signal.aborted && !run.stopping) {
@@ -382,6 +425,7 @@ export class Listener {
   }
   agentStart() { this.runStartedAt = this.clock.now(); }
   settled() {
+    this.reconnectMcp();
     for (const batch of [...this.batches.values()]) {
       if (batch.deliveredAt >= this.runStartedAt) continue;
       if (batch.state === 'open') {
@@ -556,10 +600,18 @@ export class Listener {
       unanswered: [...this.unanswered].map(([channel, ids]) => ({channel, ids: [...ids]})), lastPoll: this.lastPoll,
       attempts: [...this.store?.attempts.values() ?? []].map(a => ({id: a.id, state: a.state, body: a.body.slice(0, 80),
         ...(a.state === 'unknown' ? {warning: 'the original may have posted; check the room before resending'} : {})})),
-      repliedBytes: this.store?.size ?? 0, warnings: this.config.warnings,
+      repliedBytes: this.store?.size ?? 0, tools: this.tools?.length, toolsRefreshedAt: this.toolsAt, warnings: this.config.warnings,
       instruction: this.status === 'not signed in' ? 'Run pi mcp login filament, then /filament start.' : this.status.includes('credential rejected') ? REJECTED :
         this.status.includes('naming') || this.status.includes('not named') ? 'Finish naming the agent in the Filament app, then run /filament start.' :
         this.status.startsWith('lock error') ? 'Run /filament start --reset-lock.' : this.status.startsWith('paused') ? 'Run /filament start.' : undefined};
+  }
+  async toolsCommand(): Promise<string> {
+    if (this.current && this.identity) {
+      const b = this.binding(); this.reconnectedFor = undefined;
+      try { await this.refreshTools(b); }
+      catch (e) { if (this.valid(b) && e instanceof FilamentError && e.auth) await this.pause(b, 'credential rejected'); throw e; }
+    }
+    return this.promptSection() ?? 'No Filament tool list yet; the listener fetches it once connected.';
   }
   output(ctx: ExtensionContext, text?: string) {
     const details = this.statusObject(); const content = text ? `${text}\n${JSON.stringify(details, null, 2)}` : JSON.stringify(details, null, 2);
@@ -574,7 +626,8 @@ export class Listener {
       else if (command === 'resync') this.clear();
       else if (command === 'hello') result = await this.hello();
       else if (command === 'resend') result = await this.resend(argument);
-      else if (command !== 'status') result = 'Use /filament [status|start [--reset-lock]|stop|hello|resync|resend <id>]';
+      else if (command === 'tools') result = await this.toolsCommand();
+      else if (command !== 'status') result = 'Use /filament [status|start [--reset-lock]|stop|hello|resync|resend <id>|tools]';
     } catch (e) { result = (e as Error).message; }
     this.output(ctx, result);
   }

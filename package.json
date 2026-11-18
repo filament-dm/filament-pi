@@ -1,6 +1,6 @@
 {
   "name": "filament-pi",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A live Filament agent inside Pi",
   "type": "module",
   "keywords": ["pi-package"],

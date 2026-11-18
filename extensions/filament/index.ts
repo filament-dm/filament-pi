@@ -1,6 +1,8 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Listener } from './listener.ts';
 import type { Options, ProcessState } from './listener.ts';
+import { answersWork } from './tools.ts';
+import type { Batch } from './render.ts';
 
 export const guidelines = [
   "You are the agent named by `filament_status`, acting for your principal. Replies go out under your name. Never speak as the principal, never claim to be them, never sign as them.",
@@ -10,11 +12,13 @@ export const guidelines = [
   "If the ask is unclear, reply with one clarifying question in the same place.",
   "After `filament_reply` returns, end your turn without narrating in the terminal.",
   "Attachments arrive as local file paths; view images with the `read` tool before replying. To send a file, put its local path in `filament_reply` `attachments`; the extension uploads it. Never post a path or an `mxc://` url in the text.",
-  "Never retry a reply. \"Already answered\", \"unknown or already used reply_key\" and \"outcome unknown\" all mean move on; the user sees doubtful replies in `/filament status`."
+  "Never retry a reply. \"Already answered\", \"unknown or already used reply_key\" and \"outcome unknown\" all mean move on; the user sees doubtful replies in `/filament status`.",
+  "Every Filament tool is yours to use (`<filament_tools>` lists them): search and read, post, react, forward, join channels and more. Before saying you don't know something, look it up with `mcp__filament__search_messages`."
 ];
-export function blockPosting(toolName: string) {
-  if (['mcp__filament__post_message', 'mcp__filament__reply_in_thread'].includes(toolName))
-    return {block: true, reason: 'reply to Filament messages through filament_reply'};
+// Answering delivered work directly would bypass the duplicate-reply protection; any other post is allowed.
+export function blockPosting(toolName: string, input?: Record<string, unknown>, batches: Iterable<Batch> = []) {
+  if (answersWork(toolName, input, batches))
+    return {block: true, reason: 'this answers a delivered Filament message: reply through filament_reply with its reply_key'};
 }
 export function register(pi: ExtensionAPI, Type: any, options: Options): Listener {
   const listener = new Listener(pi, options);
@@ -39,7 +43,12 @@ export function register(pi: ExtensionAPI, Type: any, options: Options): Listene
   pi.on('session_tree', () => listener.clear());
   pi.on('agent_start', () => listener.agentStart());
   pi.on('agent_settled', () => listener.settled());
-  pi.on('tool_call', event => blockPosting(event.toolName));
+  pi.on('tool_call', event => blockPosting(event.toolName, event.input as Record<string, unknown>, listener.batches.values()));
+  pi.on('before_agent_start', event => {
+    const section = listener.promptSection();
+    if (section) event.systemPromptOptions.sections.filament_tools = section;
+    else delete event.systemPromptOptions.sections.filament_tools;
+  });
   return listener;
 }
 function processState(directory: string): ProcessState {

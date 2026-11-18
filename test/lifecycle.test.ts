@@ -108,13 +108,22 @@ test('L17 admission: lost lock refuses reply, ack and hello with no requests', a
   for (const action of [() => f.listener.reply({reply_key: f.key(), markdown_body: 'No'}), () => f.listener.reply({reply_key: f.key(), ack: true}), () => f.listener.hello()]) await assert.rejects(action(), new RegExp(ADMISSION));
   assert.equal(f.server.requests.length, count);
 });
-test('L18 bypass: direct posting always blocked, principal ping and reads allowed', () => {
-  for (const tool of ['post_message', 'reply_in_thread']) for (const _owned of [true, false]) assert.deepEqual(blockPosting(`mcp__filament__${tool}`), {block: true, reason: 'reply to Filament messages through filament_reply'});
-  for (const tool of ['message_principal', 'get_thread']) assert.equal(blockPosting(`mcp__filament__${tool}`), undefined);
-  assert.equal(guidelines.length, 8);
+test('L18 bypass: posting that answers delivered work is blocked, every other post and tool allowed', async t => {
+  const f = await fixture(t); f.server.enqueue('A', '!room:fake.test', {backchannel: false}); f.server.enqueue('B', '!other:fake.test', {backchannel: false, thread: '$root'}); await f.poll();
+  const batches = () => f.listener.batches.values(), blocked = {block: true, reason: 'this answers a delivered Filament message: reply through filament_reply with its reply_key'};
+  assert.deepEqual(blockPosting('mcp__filament__post_message', {channel: '!room:fake.test', markdown_body: 'x'}, batches()), blocked);
+  assert.deepEqual(blockPosting('mcp__filament__post_message', {channel: '!elsewhere:fake.test', in_reply_to: 'A'}, batches()), blocked);
+  assert.deepEqual(blockPosting('mcp__filament__reply_in_thread', {message_id: '$root'}, batches()), blocked);
+  assert.deepEqual(blockPosting('mcp__filament__reply_in_thread', {message_id: 'B'}, batches()), blocked);
+  assert.equal(blockPosting('mcp__filament__post_message', {channel: '!elsewhere:fake.test', markdown_body: 'x'}, batches()), undefined);
+  assert.equal(blockPosting('mcp__filament__reply_in_thread', {message_id: '$unrelated'}, batches()), undefined);
+  for (const tool of ['message_principal', 'get_thread', 'react', 'post_rechat', 'create_channel']) assert.equal(blockPosting(`mcp__filament__${tool}`, {channel: '!room:fake.test'}, batches()), undefined);
+  await f.listener.reply({reply_key: [...f.listener.batches.keys()][0], ack: true});
+  assert.equal(blockPosting('mcp__filament__post_message', {channel: '!room:fake.test'}, batches()), undefined);
+  assert.equal(guidelines.length, 9);
 });
 test('L19 settings: missing defaults, wait clamp, unknown warning', async t => {
-  const f = await fixture(t); assert.deepEqual(await settings(f.dir), {wait: 30, autoStart: true, contextMessages: 25, warnings: []});
+  const f = await fixture(t); assert.deepEqual(await settings(f.dir), {wait: 30, autoStart: true, contextMessages: 25, toolsRefreshMinutes: 60, warnings: []});
   await writeFile(join(f.dir, 'filament.json'), JSON.stringify({wait: 90, unexpected: 1})); const config = await settings(f.dir); assert.equal(config.wait, 60); assert.deepEqual(config.warnings, ['Unknown setting: unexpected']);
 });
 test('L20 rpc output: exactly one status message, structured details, no stdout', async t => {
