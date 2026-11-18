@@ -19,7 +19,7 @@ export function render(batch: Batch, identity: Identity, names: Map<string, stri
   if (earlier.length) lines.push(`Earlier messages in this conversation are still open under reply_key(s) ${earlier.join(', ')}. If you have not answered them yet, answer everything in one filament_reply using this reply_key and pass those keys in also_keys.`);
   const messageLine = (m: Message) => {
     const date = sentAt(m); const time = Number.isNaN(date.getTime()) ? 'unknown time' : `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-    return `${clean(names.get(m.sender) ?? localpart(m.sender))} (${time}): ${clean(m.body ?? '')}`;
+    return `${clean(names.get(m.sender) ?? localpart(m.sender))} (${time}): ${m.body ?? ''}`;
   };
   const attachmentLine = (media: any) => media.path ? `[attachment: ${clean(media.filename ?? 'unknown')}, ${media.mimetype ?? 'unknown'}, ${media.size ?? 'unknown'}, file: ${media.path}]` : `[attachment unavailable: ${clean(media.filename ?? 'unknown')}]`;
   const messages = batch.adopted ? batch.messages : [...batch.messages].sort((a, b) => +sentAt(a) - +sentAt(b));
@@ -38,6 +38,6 @@ export function render(batch: Batch, identity: Identity, names: Map<string, stri
     }
     lines.push('Recent context (earlier messages, not part of this request):', ...recent, 'Thread so far:', ...thread);
   }
-  lines.push(`Answer in one short reply as ${agent}: filament_reply with markdown_body. Never speak as ${owner}. No raw ids. Only if nothing needs saying (a thank-you, an emoji), call filament_reply with ack: true instead.`);
+  lines.push(`Answer in one short reply as ${agent}: filament_reply with markdown_body. Never speak as ${owner}. Keep IDs inside link destinations. Only if nothing needs saying (a thank-you, an emoji), call filament_reply with ack: true instead.`);
   return lines.join('\n\n');
 }

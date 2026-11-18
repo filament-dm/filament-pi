@@ -91,10 +91,13 @@ test('L15 enrichment: independent heartbeat fires during slow enrichment', async
   const polling = f.poll(); await until(() => f.server.count('get_recent_messages') === 1); await f.clock.tick(1000); assert.equal(f.server.count('heartbeat'), 1);
   await f.clock.tick(7000); await polling;
 });
-test('L16 render: no raw mxid; token, prior key and nudge header present', async t => {
-  const f = await fixture(t); f.server.enqueue('A', '!room:fake.test', {backchannel: false, thread: '$root', body: 'Hello @person:fake.test'}); await f.poll();
+test('L16 render: preserve member links and code; show token, prior key and nudge', async t => {
+  const f = await fixture(t);
+  const body = 'Ask [Alice](member:@u_alice:fake.test), or quote `[Bob](member:@u_bob:fake.test)`.';
+  f.server.enqueue('A', '!room:fake.test', {backchannel: false, thread: '$root', body}); await f.poll();
+  assert.ok(f.work()[0].content.includes(body));
   const text = render(f.listener.batches.get(f.key())!, f.listener.identity!, f.listener.names, ['earlier#1'], true);
-  assert.ok(text.includes(f.key())); assert.ok(text.includes('earlier#1')); assert.match(text, /handed this Filament message earlier/); assert.doesNotMatch(text, /@\w+:fake.test/); assert.match(text, /Recent context/); assert.match(text, /Thread so far/);
+  assert.ok(text.includes(f.key())); assert.ok(text.includes('earlier#1')); assert.match(text, /handed this Filament message earlier/); assert.ok(text.includes(body)); assert.match(text, /Recent context/); assert.match(text, /Thread so far/);
 });
 test('L16 render: sender by profile displayname (asked by mxid) and time from the server timestamp', async t => {
   const f = await fixture(t); f.server.enqueue('A'); await f.poll();

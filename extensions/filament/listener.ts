@@ -562,7 +562,7 @@ export class Listener {
     this.pi.appendEntry('filament-replied', {token: attempt.tokens[0], ids: attempt.ids, status: state});
     await this.options.checkpoint?.('after-outcome');
     if (auth) await this.pause(b, 'credential rejected');
-    return state === 'posted' ? 'Posted.' : state === 'rejected' ? `${error}; not retried; saved for the user` : 'outcome unknown; not retried; saved for the user (/filament status)';
+    return state === 'posted' ? 'Posted.' : state === 'rejected' ? `${error}\nReply saved for the user and not retried.` : 'outcome unknown; not retried; saved for the user (/filament status)';
   }
   resend(id: string): Promise<string> {
     const b = this.binding();
