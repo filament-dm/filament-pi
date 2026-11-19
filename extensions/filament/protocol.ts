@@ -85,7 +85,14 @@ export class FilamentClient {
         } else data = JSON.parse(raw);
       } catch { throw new FilamentError(`Malformed response (HTTP ${response.status})`); }
       if (data?.jsonrpc !== '2.0') throw new FilamentError(`Invalid JSON-RPC response (HTTP ${response.status})`);
-      if (data.error) throw new FilamentError(`Filament rejected request (${Number(data.error.code)})`, Number(data.error.code), true);
+      if (data.error) {
+        const code = Number(data.error.code);
+        let message = `Filament rejected request (${code})`;
+        if (code === -32602 && typeof data.error.message === 'string' && data.error.message.trim()) {
+          message += `: ${data.error.message.trim().slice(0, 500)}`;
+        }
+        throw new FilamentError(message, code, true);
+      }
       if (!response.ok) throw new FilamentError(`HTTP ${response.status}`);
       if (!('result' in data)) throw new FilamentError('Missing JSON-RPC result');
       if (data.result?._sessionId) this.#session = data.result._sessionId;

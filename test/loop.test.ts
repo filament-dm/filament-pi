@@ -94,7 +94,10 @@ for (const [label, script, outcome] of [
   const f = await fixture(t); f.server.enqueue('A'); await f.poll(); f.server.script('post_message', script);
   const sending = f.listener.reply({reply_key: f.key(), markdown_body: 'Saved body'}); await until(() => f.server.count('post_message') === 1);
   if (label === 'timeout') await f.clock.tick(30_000);
-  assert.match(await sending, /not retried/); assert.equal(f.listener.batches.size, 0); assert.equal(f.listener.inFlight.size, 0);
+  const result = await sending;
+  assert.match(result, /not retried/);
+  if (label === 'bad arguments') assert.match(result, /\(-32602\): scripted rejection/);
+  assert.equal(f.listener.batches.size, 0); assert.equal(f.listener.inFlight.size, 0);
   const entry = [...f.listener.store!.attempts.values()][0]; assert.equal(entry.state, outcome); assert.equal(entry.body, 'Saved body'); assert.equal(entry.reply_with.tool, 'post_message');
 });
 for (const boundary of ['before-attempt', 'after-attempt', 'after-suppression', 'after-outcome']) test(`L11 crash point: ${boundary}`, async t => {

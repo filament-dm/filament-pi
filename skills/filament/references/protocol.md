@@ -31,7 +31,7 @@ Verified 30 Sep 2026 from inside this VM. Enough detail here to re-derive `bin/f
 
 ## Reply tools
 - `post_message(channel, markdown_body, in_reply_to?)`, `reply_in_thread(message_id, markdown_body)`. `reply_with.args` already carries everything except `markdown_body`.
-- Bodies are markdown only; no HTML; no `---` rules. Mentions are `[Name](member:@mxid)`; never write a raw id where people can see it.
+- Bodies are Markdown only, with no HTML or horizontal rules. Mention a member with `[Name](member:@user:server)`. Copy a member link from the message or use the full `user_id` from `mentioned_users`. Keep IDs inside link destinations.
 
 ## Context tools
 `get_recent_messages(channel, limit, cursor?)`, `get_thread(message_id)` where `message_id` is the thread root, i.e. the work item's `thread_id`; `get_user_profile`, `get_self`, `message_principal(markdown_body)`.
