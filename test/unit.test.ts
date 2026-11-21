@@ -20,6 +20,22 @@ function launch(t: any, mode: string, dir: string, name: string) {
 }
 async function fileAppears(path: string) { for (let n = 0; n < 500; n++) { if (await stat(path).then(() => true, () => false)) return; await new Promise(r => setTimeout(r, 5)); } throw new Error('Child barrier timeout'); }
 
+test('U1b credential: the filament server\'s bearer header when no sign-in is stored', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'fpi-'));
+  t.after(() => rm(dir, {recursive: true, force: true}));
+  const endpoint = 'https://filament.test/mcp/agents';
+  const server = (header: string, url = endpoint) => writeFile(join(dir, 'mcp.json'), JSON.stringify({mcpServers: {filament: {url, headers: {Authorization: header}}}}));
+  await server('Bearer ${FILAMENT_AGENT_TOKEN}');
+  assert.equal(await credential(dir, endpoint, {FILAMENT_AGENT_TOKEN: 'from-env'}), 'from-env');
+  assert.equal(await credential(dir, endpoint, {}), undefined);
+  await server('Bearer literal-token');
+  assert.equal(await credential(dir, endpoint, {}), 'literal-token');
+  await server('Bearer ${FILAMENT_AGENT_TOKEN}', 'https://other.test/mcp');
+  assert.equal(await credential(dir, endpoint, {FILAMENT_AGENT_TOKEN: 'from-env'}), undefined);
+  await writeFile(join(dir, 'mcp-auth.json'), JSON.stringify({[`mcp__filament|${endpoint}`]: {tokens: {access_token: 'signed-in'}}}));
+  await server('Bearer ${FILAMENT_AGENT_TOKEN}');
+  assert.equal(await credential(dir, endpoint, {FILAMENT_AGENT_TOKEN: 'from-env'}), 'signed-in');
+});
 test('U1 credential: documented key, legacy key, missing file, missing key; token only', async t => {
   const dir = await directory(t), endpoint = 'http://fake/mcp';
   assert.equal(await credential(dir, endpoint), undefined);
