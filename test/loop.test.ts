@@ -12,14 +12,24 @@ test('L1 delivery once: [A] polled three times gives one delivery', async t => {
   const f = await fixture(t); f.server.enqueue('A'); await f.poll(); await f.poll(); await f.poll(); assert.equal(f.work().length, 1);
   assert.equal(f.work()[0].options.triggerTurn, true);
 });
-test('L2 batches: immutable A and B follow-up, also_keys posts once and consumes both', async t => {
+test('L2 batches: immutable A and B follow-up, steered in, also_keys posts once and consumes both', async t => {
   const f = await fixture(t); f.server.enqueue('A'); await f.poll(); const a = f.key();
   f.ctx.isIdle = () => false; f.server.enqueue('B'); await f.poll(); const b = f.key();
-  assert.deepEqual(f.work()[1].details.eventIds, ['B']); assert.match(f.work()[1].content, new RegExp(a)); assert.equal(f.work()[1].options.deliverAs, 'followUp');
+  assert.deepEqual(f.work()[1].details.eventIds, ['B']); assert.match(f.work()[1].content, new RegExp(a)); assert.equal(f.work()[1].options.deliverAs, 'steer');
   assert.equal(await f.listener.reply({reply_key: b, also_keys: [a], markdown_body: 'Answer both'}), 'Posted.');
   assert.equal(f.server.count('post_message'), 1); assert.equal(f.server.requests.find(r => r.name === 'post_message')?.args.in_reply_to, 'B');
   for (const id of ['A', 'B']) assert.equal(f.listener.store!.replied.get(id)?.s, 'replied');
   await assert.rejects(f.listener.reply({reply_key: a, markdown_body: 'again'}), /already used/);
+});
+test('L2b steering: only the same conversation steers a busy agent; others wait for it to finish', async t => {
+  const f = await fixture(t); f.server.enqueue('A', '!one:fake.test'); await f.poll();
+  f.ctx.isIdle = () => false;
+  f.server.enqueue('B', '!two:fake.test'); await f.poll();
+  assert.deepEqual(f.work()[1].details.eventIds, ['B']); assert.equal(f.work()[1].options.deliverAs, 'followUp');
+  f.server.enqueue('C', '!one:fake.test', {thread: 'A'}); await f.poll();
+  assert.deepEqual(f.work()[2].details.eventIds, ['C']); assert.equal(f.work()[2].options.deliverAs, 'followUp');
+  f.server.enqueue('D', '!two:fake.test'); await f.poll();
+  assert.deepEqual(f.work()[3].details.eventIds, ['D']); assert.equal(f.work()[3].options.deliverAs, 'steer');
 });
 test('L3 B unseen: arrival during send becomes its own batch, never marked replied', async t => {
   const f = await fixture(t); f.server.enqueue('A'); await f.poll(); const wait = gate();
