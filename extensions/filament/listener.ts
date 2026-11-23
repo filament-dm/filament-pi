@@ -419,10 +419,13 @@ export class Listener {
       metadataUnavailable: batch.messages.some(m => !m.body && !fetched.some(f => f.event_id === m.event_id))};
   }
   deliver(batch: Batch, nudge = false) {
-    const earlier = [...this.batches.values()].filter(other => other.token !== batch.token && other.channel_id === batch.channel_id && other.deliveredAt <= batch.deliveredAt).map(other => other.token);
+    const open = [...this.batches.values()].filter(other => other.token !== batch.token && other.channel_id === batch.channel_id && other.deliveredAt <= batch.deliveredAt);
+    const earlier = open.map(other => other.token);
+    // Busy with this very conversation: steer the work in progress. Anything else waits until it is done.
+    const sameConversation = open.some(other => (other.thread_id ?? null) === (batch.thread_id ?? null));
     this.pi.sendMessage({customType: 'filament-work', display: true, content: render(batch, this.identity!, this.names, earlier, nudge),
       details: {token: batch.token, channel_id: batch.channel_id, thread_id: batch.thread_id, is_backchannel: batch.is_backchannel, eventIds: batch.eventIds, generation: batch.generation}},
-      {triggerTurn: true, deliverAs: this.ctx?.isIdle() ? undefined : 'followUp'});
+      {triggerTurn: true, deliverAs: this.ctx?.isIdle() ? undefined : sameConversation ? 'steer' : 'followUp'});
   }
   agentStart() { this.runStartedAt = this.clock.now(); }
   settled() {
