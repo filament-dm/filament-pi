@@ -72,7 +72,7 @@ test('look-around: the step names the Pi tools, the backchannel and the shared w
   const text = lookAround(identity);
   for (const part of ['Test Agent (you)', 'your owner pat', 'do not use filament_reply', '`mcp__filament__set_status` with `channel` = your backchannel\'s id (`!private:fake.test`) and `Looking around Filament…`',
     '`mcp__filament__set_status` with only `channel`', 'https://filament.dm/llms.txt', '`mcp__filament__get_settings` and `mcp__filament__list_channels`',
-    'Post one message to your backchannel with `mcp__filament__message_principal`', 'Open with "I took a look around Filament."', 'If any step fails, skip the rest and say nothing about it.', 'Leave out ids.'])
+    'Post one message to your backchannel with `mcp__filament__message_principal`', 'Open by saying, in your own words, that you took a look around Filament', 'If any step fails, skip the rest and say nothing about it.', 'Leave out ids.'])
     assert.ok(text.includes(part), part);
   assert.ok(!text.includes('—'));
   assert.match(lookAround({...identity, cc_room_id: undefined}), /the `cc_room_id` that `mcp__filament__get_self` returns/);
