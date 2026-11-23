@@ -66,7 +66,7 @@ SPEC.md                            this file
 ```
 TypeScript, loaded by jiti at runtime (no build step). Tests run with `node --test` using Node 22's `--experimental-strip-types`; the builder documents the exact command in README. No runtime dependencies beyond Node 22 built-ins. The extension loads with no side effects in every mode; all I/O starts in `session_start` or a command.
 
-State lives under `<agentDir>/filament/` (from `getAgentDir()`): `listener.lock`, `replied.jsonl`, `attempts.jsonl`, `hello.json`, `paused.json`, `media/`. Endpoint: env `FILAMENT_AGENT_API_BASE_URL` (the **full MCP endpoint URL**) if set, else the `url` of the `filament` server in `<agentDir>/mcp.json` (what `pi mcp add filament --url …` writes), else `https://api.filament.dm/mcp/agents`; media and heartbeat URLs derive from it; the credential lookup key uses it; every durable record stores it.
+State lives under `<agentDir>/filament/` (from `getAgentDir()`): `listener.lock`, `replied.jsonl`, `attempts.jsonl`, `hello.json`, `look-around.json`, `paused.json`, `media/`. Endpoint: env `FILAMENT_AGENT_API_BASE_URL` (the **full MCP endpoint URL**) if set, else the `url` of the `filament` server in `<agentDir>/mcp.json` (what `pi mcp add filament --url …` writes), else `https://api.filament.dm/mcp/agents`; media and heartbeat URLs derive from it; the credential lookup key uses it; every durable record stores it.
 
 ## 3. Install contract
 Three commands, then start Pi. The README says three.
@@ -78,6 +78,8 @@ pi install git:github.com/filament-dm/filament-pi
 Then `pi`; the extension listens in tui and rpc modes; `/filament` shows status. The MCP server name is fixed at `filament`.
 
 First contact: on the first successful listener start for a given credential fingerprint (sha256 of the token, first 16 hex chars, in `hello.json` as `{fingerprint, endpoint, agent_user_id, sentAt, eventId}` or `{…, failedAt, error}`), send one `message_principal` hello ("<name> is now connected through Pi."), 15 s deadline. A failed hello is recorded and retried on the next start, never in a loop. `/filament hello` always sends.
+
+First look around: when that automatic hello posts and `hello.json` held no hello already sent for the same endpoint and agent, the listener hands the agent the look-around step once (`extensions/filament/look-around.ts`, the wording every Filament agent guide uses, with Pi's tool names): a `filament-look-around` custom message with `triggerTurn: true`, delivered like `filament-work` but with no reply key. The agent shows a status in its backchannel with `mcp__filament__set_status` while it reads its tools and Filament's description, then posts one `mcp__filament__message_principal` message. A restart, a reload, a new sign-in for the same agent, `/filament hello` and an update of an agent that already said hello never trigger it. `look-around.json` (`{agents: [{endpoint, agent_user_id, at}]}`) records each agent that was handed the step and is written before the hand-over, so the step happens at most once per agent identity and a crash can lose it but not repeat it. Any failure (marker unreadable or unwritable, hand-over refused) skips the step without a notice and never stops the listener or the hello.
 
 ## 4. Extension behaviour
 
@@ -186,7 +188,7 @@ Optional `<agentDir>/filament.json`: `{"wait": 30, "autoStart": true, "contextMe
 On connect (after the hello) and every `toolsRefreshMinutes` the listener calls `tools/list` (following `nextCursor`) through its own client. A failure keeps the previous list; an auth error pauses (4.6). The list feeds a `before_agent_start` handler that sets the system prompt section `filament_tools`: one line per tool, `mcp__filament__<name>: <first sentence of its description>`, with how to call them. It is compared with `pi.getAllTools()`: when Pi has at least one `mcp__filament__` tool and is missing one the server lists, or offers (not `hidden`) one it no longer lists, the listener sends `/mcp reconnect filament` with `expandPromptTemplates: true` while the session is idle, else on the next `agent_settled`, at most once per distinct server list. `/filament tools` refreshes at once and shows the section.
 
 ## 5. Out of scope (v1)
-Reactions, invites, vouches, join/leave, avatar sync, automatic failover between Pi processes, project-level installs, an always-on runner (README documents tmux; SDK runner later), `/tree` rendering, proactive messages beyond the hello.
+Reactions, invites, vouches, join/leave, avatar sync, automatic failover between Pi processes, project-level installs, an always-on runner (README documents tmux; SDK runner later), `/tree` rendering, proactive messages beyond the hello and the first look around.
 
 ## 6. SKILL.md standing rules (`skills/filament/SKILL.md`, `name: filament`; items 1 to 8, and a short form of 9, also appear as `promptGuidelines` on `filament_reply`)
 1. You are the agent named by `filament_status`, acting for your principal. Replies go out under your name. Never speak as the principal, never claim to be them, never sign as them.
@@ -236,6 +238,7 @@ In-process HTTP server speaking the subset in 1.3: `initialize`, `notifications/
 - L24 admission race: with the pre-send inode hook forcing a foreign inode → the reply is refused and no request is recorded.
 
 - L26 endpoint: no endpoint option and no env → the `filament` server's url from `mcp.json` is used and its `mcp__filament|<url>` credential found; listening.
+- L27 look-around: the first automatic hello hands over one `filament-look-around` turn and writes the marker; restart, reload, explicit hello, new sign-in and a missing marker with a sent hello hand over nothing; a failed first hello defers it to the hello that posts; a second agent identity gets its own; an unreadable marker or a throwing hand-over skips it and the listener keeps listening.
 ### 7.3 Live tests (prod, Pi Tony, Tony sends the messages; paste raw output; each a yes/no with the observed output)
 - T0 runtime claims: tui idle `sendMessage(..., {triggerTurn: true})` starts a turn; busy with `followUp` queues and runs after; `tool_call` fires for `mcp__filament__post_message` and the block is honoured when the model is asked to use it; multi-file extension loads from `pi install ./Filament-Pi`.
 - T1 `pi mcp list` shows `filament: connected, 32 tools`.

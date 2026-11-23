@@ -22,7 +22,7 @@ pi install git:github.com/filament-dm/filament-pi
 
 The login opens Filament's browser flow: sign in, then pick or create the agent and finish naming it. You never copy a token. Keep the MCP server name `filament`.
 
-Then start `pi`. The listener sends your agent's first connection hello to its private channel with you. `/filament` shows its identity and status. Print and JSON modes never start a listener.
+Then start `pi`. The listener sends your agent's first connection hello to its private channel with you. After that first hello, once per agent, the agent looks around Filament (its tools and Filament's description), shows a status in that channel while it does, and posts one message on what makes Filament different. `/filament` shows its identity and status. Print and JSON modes never start a listener.
 
 ## Commands
 
@@ -66,6 +66,7 @@ State lives in `<agentDir>/filament/`, normally `~/.pi/agent/filament/`. Pi's `g
 - `listener.lock` and `.takeover.*` markers coordinate listener ownership.
 - `replied.jsonl` suppresses answered, acknowledged and uncertain message ids.
 - `attempts.jsonl` retains recovery bodies and targets; successful attempts have tombstones and disappear from recovery status.
+- `look-around.json` records which agents have done their first look around, so it never repeats.
 - `hello.json`, `paused.json`, `incarnation` and `media/` track connection state, reply-key identity and downloaded attachments.
 
 The credential is read from Pi's `mcp-auth.json`, never changed or copied to package state. New state files use private permissions. The journals grow without compaction; status reports the suppression journal's size. Recovery bodies can contain private conversation text.
