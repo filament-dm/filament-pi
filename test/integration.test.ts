@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, writeFile, readdir, stat, mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { readFile, writeFile, readdir, stat, mkdtemp, mkdir, rm, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { FilamentClient, FilamentError } from '../extensions/filament/protocol.ts';
 import { Listener } from '../extensions/filament/listener.ts';
@@ -72,7 +72,10 @@ test('reply attachments: the extension uploads local files itself, passes mxc ur
   const outside = await mkdtemp(join(tmpdir(), 'filament-pi-out-')); t.after(() => rm(outside, {recursive: true, force: true}));
   await writeFile(join(outside, 'chart.png'), 'chart');
   await mkdir(join(f.dir, 'filament', 'media'), {recursive: true}); await writeFile(join(f.dir, 'filament', 'media', 'seen.png'), 'seen');
-  const refusals: [any[], RegExp][] = [[[{path: join(f.dir, 'mcp-auth.json')}], /settings directory/], [[{path: join(outside, 'missing.png')}], /not found/],
+  // An agent directory's link to credentials kept elsewhere (the desktop app links the owner's auth.json).
+  await writeFile(join(outside, 'owner-auth.json'), '{"secret":1}'); await symlink(join(outside, 'owner-auth.json'), join(f.dir, 'auth.json'));
+  const refusals: [any[], RegExp][] = [[[{path: join(f.dir, 'mcp-auth.json')}], /settings directory/], [[{path: join(f.dir, 'auth.json')}], /settings directory/],
+    [[{path: join(homedir(), '.pi', 'agent', 'auth.json')}], /settings directory|not found/], [[{path: join(outside, 'missing.png')}], /not found/],
     [[{mxc_url: 'https://elsewhere/x.png'}], /not an mxc/], [[{path: outside}], /not a non-empty file/]];
   for (const [attachments, error] of refusals) await assert.rejects(f.listener.reply({reply_key: f.key(), attachments}), error);
   f.server.script('upload', {status: 413, result: {error: 'payload_too_large'}});

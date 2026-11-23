@@ -516,10 +516,18 @@ export class Listener {
   // Reply attachments: a local file is uploaded by the listener's own client (the bytes never pass
   // through the model); an mxc_url the model already uploaded is passed on. Never Pi's own
   // directory (credentials), apart from the inbound attachments the listener saved there.
+  // Checked as given and as resolved: an agent directory may link to the owner's credentials,
+  // and the owner's own Pi directory (~/.pi/agent) is never sent either.
   async upload(list: NonNullable<ReplyParams['attachments']>, b: Binding): Promise<Attachment[]> {
     if (list.length > 10) throw new Error('At most 10 attachments per reply; nothing sent');
     const agentDir = await realpath(this.options.agentDir()).catch(() => this.options.agentDir());
     const inbound = join(agentDir, 'filament', 'media') + sep;
+    const ownerDir = join(homedir(), '.pi', 'agent');
+    const protectedDirs = [...new Set([agentDir, resolve(this.options.agentDir()), ownerDir,
+      await realpath(ownerDir).catch(() => ownerDir)])];
+    const inboundDirs = [inbound, join(resolve(this.options.agentDir()), 'filament', 'media') + sep];
+    const isProtected = (path: string) => !inboundDirs.some(dir => path.startsWith(dir)) &&
+      protectedDirs.some(dir => path === dir || path.startsWith(dir + sep));
     const out: Attachment[] = [];
     for (const item of list) {
       const filename = item.filename?.trim() || undefined;
@@ -529,9 +537,10 @@ export class Listener {
       }
       if (!item.path?.trim() || item.mxc_url) throw new Error('Each attachment needs a local file path (or an mxc_url), not both; nothing sent');
       const given = item.path.trim().replace(/^~(?=\/|$)/, homedir());
+      const asGiven = resolve(this.ctx?.cwd ?? process.cwd(), given);
       let file: string;
-      try { file = await realpath(resolve(this.ctx?.cwd ?? process.cwd(), given)); } catch { throw new Error(`Attachment ${item.path} not found; nothing sent`); }
-      if ((file === agentDir || file.startsWith(agentDir + sep)) && !file.startsWith(inbound)) throw new Error(`Attachment ${item.path} is in Pi's own settings directory, which is never sent; nothing sent`);
+      try { file = await realpath(asGiven); } catch { throw new Error(`Attachment ${item.path} not found; nothing sent`); }
+      if (isProtected(asGiven) || isProtected(file)) throw new Error(`Attachment ${item.path} is in Pi's own settings directory, which is never sent; nothing sent`);
       const info = await stat(file);
       if (!info.isFile() || !info.size) throw new Error(`Attachment ${item.path} is not a non-empty file; nothing sent`);
       if (info.size > 100 * 1024 * 1024) throw new Error(`Attachment ${item.path} is over 100 MB; nothing sent`);
