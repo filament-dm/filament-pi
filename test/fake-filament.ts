@@ -91,6 +91,7 @@ export class FakeFilament {
       if (name === 'initialize') result = {protocolVersion: '2024-11-05'};
       else if (name === 'tools/list') result = {tools: structuredClone(this.tools)};
       else if (name === 'get_self') result = this.identity;
+      else if (name === 'report_runtime') result = {ok: true, runtime: structuredClone(args)};
       else if (name === 'poll_work') { this.polls.push(structuredClone(args ?? {})); result = {work: structuredClone([...this.channels.values()]), cursor: 'next', next_poll_ms: 1000, truncated: false, acknowledged: this.acknowledged}; }
       else if (name === 'get_recent_messages') result = {messages: structuredClone(this.channels.get(args.channel)?.messages ?? [])};
       else if (name === 'get_thread') result = {messages: structuredClone([...this.channels.values()].find(c => c.thread_id === args.message_id)?.messages ?? [])};

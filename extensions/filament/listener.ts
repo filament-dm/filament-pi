@@ -1,11 +1,11 @@
 import { mkdir, readFile, realpath, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, extname, join, resolve, sep } from 'node:path';
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { createHash, randomBytes } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { credential, endpoint as resolveEndpoint, fingerprint, settings } from './credential.ts';
-import { FilamentClient, FilamentError, sleep, systemClock } from './protocol.ts';
+import { FilamentClient, FilamentError, PACKAGE_VERSION, sleep, systemClock } from './protocol.ts';
 import type { Clock, Fetch, ToolInfo } from './protocol.ts';
 import { catalog, digest, drift } from './tools.ts';
 import { ListenerLock, ADMISSION } from './lock.ts';
@@ -201,6 +201,8 @@ export class Listener {
     if (typeof self.user_id !== 'string') throw new FilamentError('Missing agent identity');
     this.identity = {user_id: self.user_id, display_name: clean(self.display_name ?? localpart(self.user_id)),
       owner: {display_name: clean(self.owner?.display_name ?? 'principal')}, cc_room_id: self.cc_room_id};
+    await this.reportRuntime(b);
+    if (!this.valid(b)) return false;
     await this.hello(false, b);
     if (!this.valid(b)) return false;
     await this.refreshTools(b);
@@ -209,6 +211,18 @@ export class Listener {
     this.repeat(b.run, 25_000, async binding => { await b.run.client.heartbeat(b.run.polling.signal); if (!this.valid(binding)) return; });
     this.repeat(b.run, this.config.toolsRefreshMinutes * 60_000, binding => this.refreshTools(binding));
     return true;
+  }
+  // Tell Filament which package version runs this agent and on which computer (agent_runtime),
+  // like the Claude Code and Codex agents. Once per connection; a failure never stops listening.
+  async reportRuntime(b: Binding) {
+    const machine = hostname().split('.')[0];
+    try {
+      await b.run.client.callTool('report_runtime', {harness: 'pi', version: PACKAGE_VERSION, server: 'filament', ...(machine ? {machine} : {})},
+        8000, b.run.polling.signal);
+    } catch (e) {
+      if (e instanceof FilamentError && e.auth) throw e;
+      if (this.valid(b)) (this.options.log ?? (s => console.error(s)))(`[filament] runtime report failed: ${(e as Error).message}`);
+    }
   }
   // Pi's MCP client lists the server's tools once per connection and the server announces no
   // changes, so a long-running Pi would keep the tools it started with. Fetch the list here.

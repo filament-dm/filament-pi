@@ -3,6 +3,9 @@ export interface Clock {
   timer(fn: () => void, ms: number): unknown;
   clear(id: unknown): void;
 }
+// This package's version, as in package.json (a test keeps them equal).
+export const PACKAGE_VERSION = '0.2.1';
+
 export const systemClock: Clock = {
   now: () => Date.now(), timer: (fn, ms) => setTimeout(fn, ms),
   clear: id => clearTimeout(id as ReturnType<typeof setTimeout>),
@@ -103,7 +106,7 @@ export class FilamentClient {
     if (this.#ready) return;
     if (!this.#handshake) this.#handshake = (async () => {
       const deadline = this.#clock.now() + 15_000;
-      await this.#rpc('initialize', {protocolVersion: '2025-03-26', capabilities: {}, clientInfo: {name: 'filament-pi', version: '0.2.0'}}, 15_000, signal);
+      await this.#rpc('initialize', {protocolVersion: '2025-03-26', capabilities: {}, clientInfo: {name: 'filament-pi', version: PACKAGE_VERSION}}, 15_000, signal);
       await this.#rpc('notifications/initialized', {}, Math.max(1, deadline - this.#clock.now()), signal, true);
       this.#ready = true;
     })().finally(() => { this.#handshake = undefined; });
