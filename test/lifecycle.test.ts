@@ -10,6 +10,7 @@ import { settings } from '../extensions/filament/credential.ts';
 import { ADMISSION } from '../extensions/filament/lock.ts';
 import { fixture, until } from './helpers.ts';
 import { gate, flush } from './fake-filament.ts';
+import { PACKAGE_VERSION } from '../extensions/filament/protocol.ts';
 
 for (const event of ['resume', 'session_tree', 'resync']) test(`L13 generation: ${event} clears open batch, drops late enrichment, next poll redelivers`, async t => {
   const f = await fixture(t); f.server.enqueue('A'); await f.poll(); const oldKey = f.key();
@@ -22,6 +23,23 @@ for (const event of ['resume', 'session_tree', 'resync']) test(`L13 generation: 
 test('L26 endpoint: the registered filament server is used and its credential found', async t => {
   const f = await fixture(t, {endpoint: undefined}); await f.poll();
   assert.equal(f.listener.status, 'listening'); assert.ok(f.server.count('poll_work') >= 1);
+});
+test('L27 runtime: each connection reports the package version as harness pi', async t => {
+  const f = await fixture(t); await f.poll();
+  const [report, ...more] = f.server.requests.filter(r => r.name === 'report_runtime');
+  assert.equal(more.length, 0);
+  const {machine, ...rest} = report.args;
+  assert.deepEqual(rest, {harness: 'pi', version: PACKAGE_VERSION, server: 'filament'});
+  assert.ok(machine === undefined || (typeof machine === 'string' && machine && !machine.includes('.')));
+});
+test('L27 runtime: a server that refuses the report still gets a listening agent', async t => {
+  const f = await fixture(t); f.server.script('report_runtime', {result: {isError: true, content: [{type: 'text', text: 'Unknown tool'}]}});
+  await f.poll();
+  assert.equal(f.listener.status, 'listening'); assert.ok(f.server.count('poll_work') >= 1);
+});
+test('L27 runtime: PACKAGE_VERSION is the version in package.json', async () => {
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(PACKAGE_VERSION, pkg.version);
 });
 test('L13 binding: new credential start ignores old poll 401 and remains listening', async t => {
   const f = await fixture(t); const wait = gate(); f.server.script('poll_work', {gate: wait.promise, ignoreAbort: true, status: 401});
