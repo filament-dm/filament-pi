@@ -26,6 +26,22 @@ test('protocol: request deadlines include response body; redirects never followe
   const slow = new FilamentClient('http://fake/mcp', 'fake-secret', async () => new Response(new ReadableStream({start() {}})), clock);
   const pending = slow.callTool('get_self', {}, 50).catch(e => e); await clock.tick(50); assert.ok(await pending instanceof FilamentError);
 });
+test('protocol: isError tool results throw a rejection carrying their message; normal results still parse', async () => {
+  let result: any;
+  const client = new FilamentClient('http://fake/mcp', 'fake-secret', async () => Response.json({jsonrpc: '2.0', id: 1, result}));
+  const rejection = async (r: any) => { result = r; return client.callTool('get_thread', {}).then(() => assert.fail('expected rejection'), e => e); };
+  for (const [content, message] of [
+    [[{type: 'text', text: '  bad cursor  '}], 'Filament rejected request: bad cursor'],
+    [[{type: 'text', text: JSON.stringify({error: 'message_id $x not found'})}], 'Filament rejected request: message_id $x not found'],
+    [[{type: 'text', text: 'x'.repeat(600)}], `Filament rejected request: ${'x'.repeat(500)}`],
+    [[], 'Filament rejected request'],
+  ] as const) {
+    const e = await rejection({content, isError: true});
+    assert.ok(e instanceof FilamentError); assert.equal(e.message, message); assert.equal(e.code, -32602); assert.equal(e.rpc, true); assert.equal(e.auth, false);
+  }
+  result = {content: [{type: 'text', text: JSON.stringify({messages: []})}], isError: false};
+  assert.deepEqual(await client.callTool('get_thread', {}), {messages: []});
+});
 test('factory registrations: no I/O, tools and handlers wired; print/json never start', async t => {
   const f = await fixture(t); await f.listener.stop();
   const tools: any[] = [], handlers = new Map(), commands = new Map(); let dirs = 0;
