@@ -111,8 +111,15 @@ export class FilamentClient {
   }
   async callTool(name: string, args: Record<string, unknown>, timeout = 30_000, signal?: AbortSignal): Promise<any> {
     const result = await this.#rpc('tools/call', {name, arguments: args}, timeout, signal);
+    // MCP 2025-11-25+ (SEP-1303): a tool's failure is a result flagged isError, its message as text, maybe {"error": …}.
+    if (result?.isError) {
+      const text = typeof result.content?.[0]?.text === 'string' ? result.content[0].text : '';
+      let message = text;
+      try { const parsed = JSON.parse(text); if (typeof parsed?.error === 'string') message = parsed.error; } catch {}
+      message = message.trim().slice(0, 500);
+      throw new FilamentError(message ? `Filament rejected request: ${message}` : 'Filament rejected request', -32602, true);
+    }
     try {
-      if (result?.isError) throw new Error();
       const parsed = JSON.parse(result.content[0].text);
       if (!parsed || typeof parsed !== 'object') throw new Error();
       return parsed;
